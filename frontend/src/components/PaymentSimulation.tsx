@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { CreditCard, Smartphone, Loader2, AlertCircle, CheckCircle2, XCircle, Clock3 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Label } from '@/components/ui/label';
@@ -8,6 +8,7 @@ import DigitalTicket from '@/components/DigitalTicket';
 import { cn } from '@/lib/utils';
 import { useToast } from '@/hooks/use-toast';
 import api from '@/lib/api';
+import io, { type Socket } from 'socket.io-client';
 
 interface PaymentSimulationProps {
   initialRouteId?: string;
@@ -52,7 +53,9 @@ const PaymentSimulation = ({
   const [driverWhatsappStatus, setDriverWhatsappStatus] = useState<{ sent: boolean; error: string | null } | null>(null);
   const [paymentStatus, setPaymentStatus] = useState<'idle' | 'processing' | 'success' | 'failed'>('idle');
   const { toast } = useToast();
-  const [pollingId, setPollingId] = useState<number | null>(null);
+  const pollingIdRef = useRef<number | null>(null);
+  const paymentSocketRef = useRef<Socket | null>(null);
+  const paymentResolvedRef = useRef(false);
   const paymentMode = String(import.meta.env.VITE_PAYMENT_MODE || 'mpesa').toLowerCase();
   const useLiveMpesa = paymentMode !== 'simulation' && paymentMode !== 'mock';
 
@@ -183,8 +186,78 @@ const PaymentSimulation = ({
   const phoneValid = phoneNumber.trim().length >= 9;
   const selectedRoute = availableRoutes.find((r) => r.id === selectedRouteId);
   const fare = selectedRoute?.fare ?? initialRouteFallback?.fare ?? 0;
-  const pollIntervalMs = useLiveMpesa ? 1500 : 1000;
-  const refreshEveryAttempts = useLiveMpesa ? 3 : 1;
+  const pollIntervalMs = 1000;
+  const refreshEveryAttempts = 1;
+
+  const stopPolling = () => {
+    if (pollingIdRef.current) {
+      window.clearInterval(pollingIdRef.current);
+      pollingIdRef.current = null;
+    }
+  };
+
+  const closePaymentSocket = () => {
+    if (paymentSocketRef.current) {
+      paymentSocketRef.current.disconnect();
+      paymentSocketRef.current = null;
+    }
+  };
+
+  const applyCompletedPayment = (payment: any, statusRes: any = {}) => {
+    const ref = statusRes.ticket?.reference || payment.transaction_id || `TKT-${payment.id}`;
+    setTransactionRef(ref);
+    setPaidAt(String(statusRes.ticket?.paidAt || payment.updated_at || new Date().toISOString()));
+    setWhatsappStatus(statusRes.whatsapp_status || null);
+    setDriverWhatsappStatus(statusRes.driver_whatsapp_status || null);
+    setPaymentStatus('success');
+    setIsProcessing(false);
+    showPaymentToast({ title: 'Payment Confirmed', description: `Ticket: ${ref}` });
+    setTimeout(() => setShowTicket(true), 300);
+  };
+
+  const applyFailedPayment = (payment: any) => {
+    setIsProcessing(false);
+    setPaymentStatus('failed');
+    showPaymentToast({
+      title: 'Payment Failed',
+      description: payment?.failure_reason || 'M-Pesa payment was not completed.',
+      variant: 'destructive',
+    });
+  };
+
+  const setupPaymentSocket = (paymentId: number) => {
+    closePaymentSocket();
+
+    const socket = io(import.meta.env.VITE_API_URL || undefined, {
+      transports: ['websocket', 'polling'],
+    });
+
+    socket.on('connect', () => {
+      socket.emit('join', `payment_${paymentId}`);
+    });
+
+    socket.on('payment.statusUpdated', (payload: any) => {
+      if (!payload || Number(payload.payment_id) !== Number(paymentId) || paymentResolvedRef.current) return;
+
+      if (payload.status === 'completed') {
+        paymentResolvedRef.current = true;
+        stopPolling();
+        applyCompletedPayment(payload, {
+          ticket: { reference: payload.ticket_reference, paidAt: payload.updated_at },
+        });
+        closePaymentSocket();
+      }
+
+      if (payload.status === 'failed') {
+        paymentResolvedRef.current = true;
+        stopPolling();
+        applyFailedPayment(payload);
+        closePaymentSocket();
+      }
+    });
+
+    paymentSocketRef.current = socket;
+  };
 
   const showPaymentToast = ({
     title,
@@ -212,6 +285,11 @@ const PaymentSimulation = ({
   const pollPaymentUntilResolved = (paymentId: number, maxAttempts = 90) => {
     let attempts = 0;
     const id = window.setInterval(async () => {
+      if (paymentResolvedRef.current) {
+        stopPolling();
+        return;
+      }
+
       attempts += 1;
       try {
         const shouldRefresh = useLiveMpesa && (attempts === 1 || attempts % refreshEveryAttempts === 0);
@@ -219,35 +297,26 @@ const PaymentSimulation = ({
         const payment = statusRes.payment || statusRes;
 
         if (payment?.status === 'completed') {
-          window.clearInterval(id);
-          const ref = statusRes.ticket?.reference || payment.transaction_id || `TKT-${payment.id}`;
-          setTransactionRef(ref);
-          setPaidAt(String(statusRes.ticket?.paidAt || payment.updated_at || new Date().toISOString()));
-          setWhatsappStatus(statusRes.whatsapp_status || null);
-          setDriverWhatsappStatus(statusRes.driver_whatsapp_status || null);
-          setPaymentStatus('success');
-          setIsProcessing(false);
-          showPaymentToast({ title: 'Payment Confirmed', description: `Ticket: ${ref}` });
-          setTimeout(() => setShowTicket(true), 300);
+          paymentResolvedRef.current = true;
+          stopPolling();
+          applyCompletedPayment(payment, statusRes);
+          closePaymentSocket();
           return;
         }
 
         if (payment?.status === 'failed') {
-          window.clearInterval(id);
-          setIsProcessing(false);
-          setPaymentStatus('failed');
-          showPaymentToast({
-            title: 'Payment Failed',
-            description: payment.failure_reason || 'M-Pesa payment was not completed.',
-            variant: 'destructive',
-          });
+          paymentResolvedRef.current = true;
+          stopPolling();
+          applyFailedPayment(payment);
+          closePaymentSocket();
           return;
         }
       } catch {
       }
 
       if (attempts >= maxAttempts) {
-        window.clearInterval(id);
+        stopPolling();
+        closePaymentSocket();
         setIsProcessing(false);
         setPaymentStatus('idle');
         showPaymentToast({
@@ -257,7 +326,7 @@ const PaymentSimulation = ({
       }
     }, pollIntervalMs);
 
-    setPollingId(id);
+    pollingIdRef.current = id;
   };
 
   const handlePayment = async () => {
@@ -291,6 +360,9 @@ const PaymentSimulation = ({
 
     setIsProcessing(true);
     setPaymentStatus('processing');
+    paymentResolvedRef.current = false;
+    stopPolling();
+    closePaymentSocket();
 
     try {
       if (useLiveMpesa) {
@@ -307,6 +379,7 @@ const PaymentSimulation = ({
             title: 'STK Prompt Sent',
             description: 'Check your phone for the M-Pesa prompt and enter your PIN.',
           });
+          setupPaymentSocket(Number(res.payment_id));
           pollPaymentUntilResolved(Number(res.payment_id), 120);
         } else {
           setPaymentStatus('failed');
@@ -341,6 +414,7 @@ const PaymentSimulation = ({
       }
 
       // Poll for payment completion/transaction id
+      setupPaymentSocket(Number(createdPayment.id));
       pollPaymentUntilResolved(Number(createdPayment.id), 15);
     } catch (error: any) {
       setIsProcessing(false);
@@ -353,11 +427,10 @@ const PaymentSimulation = ({
   useEffect(() => {
     // cleanup polling if component unmounts
     return () => {
-      if (pollingId) {
-        window.clearInterval(pollingId);
-      }
+      stopPolling();
+      closePaymentSocket();
     };
-  }, [pollingId]);
+  }, []);
 
   if (showTicket) {
     const selRoute = selectedRoute || initialRouteFallback || {

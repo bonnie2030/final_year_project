@@ -38,9 +38,25 @@ const isTruthyRefresh = (value) => {
   return normalized === '1' || normalized === 'true' || normalized === 'yes';
 };
 
-const STK_QUERY_MIN_INTERVAL_MS = 5000;
+const STK_QUERY_MIN_INTERVAL_MS = 2000;
 const STK_RATE_LIMIT_COOLDOWN_MS = 65000;
 const stkQueryLastRunByCheckout = new Map();
+
+const emitPaymentStatusUpdate = (io, payment, extras = {}) => {
+  if (!io || !payment?.id) return;
+
+  const payload = {
+    payment_id: payment.id,
+    status: payment.status,
+    transaction_id: payment.transaction_id || null,
+    failure_reason: payment.failure_reason || null,
+    updated_at: payment.updated_at || new Date().toISOString(),
+    ...extras,
+  };
+
+  io.to(`payment_${payment.id}`).emit('payment.statusUpdated', payload);
+  io.to('admin').emit('payment.statusUpdated', payload);
+};
 
 class PaymentController {
   // Auto-increment vehicle occupancy when a payment completes.
@@ -170,6 +186,11 @@ class PaymentController {
           const result = paymentWithDetails || updated;
           result.whatsapp_status = customerWhatsappStatus;
           result.driver_whatsapp_status = driverWhatsappStatus;
+          emitPaymentStatusUpdate(io, result, {
+            ticket_reference: ticketReference,
+            route_name: result.route_name || null,
+            amount: result.amount,
+          });
           // Auto-increment vehicle occupancy from this completed payment
           await PaymentController.autoIncrementOccupancy(updated, io);
           return result;
@@ -183,6 +204,12 @@ class PaymentController {
           null,
           resultDesc
         );
+        if (updatedFailed) {
+          emitPaymentStatusUpdate(io, updatedFailed, {
+            route_name: payment.route_name || null,
+            amount: payment.amount,
+          });
+        }
         return updatedFailed || payment;
       }
 
@@ -354,6 +381,13 @@ class PaymentController {
 
         const paymentWithDetails = await PaymentModel.getPaymentByIdWithDetails(updatedPayment.id);
         const ticketReference = getSafeTicketReference(paymentWithDetails || updatedPayment);
+        const io = req.app.get('io') || null;
+
+        emitPaymentStatusUpdate(io, paymentWithDetails || updatedPayment, {
+          ticket_reference: ticketReference,
+          route_name: paymentWithDetails?.route_name || null,
+          amount: updatedPayment.amount,
+        });
 
         let customerWhatsappStatus = { sent: false, error: null };
         let driverWhatsappStatus = { sent: false, error: null };
@@ -403,15 +437,21 @@ class PaymentController {
 
         console.log(`✓ Payment verified and completed for payment_id=${updatedPayment.id}`);
         // Auto-increment vehicle occupancy from this completed payment
-        const io = req.app.get('io') || null;
         await PaymentController.autoIncrementOccupancy(updatedPayment, io);
       } else {
-        await PaymentModel.updateStatusByCheckoutRequestId(
+        const failedPayment = await PaymentModel.updateStatusByCheckoutRequestId(
           checkoutRequestId,
           'failed',
           null,
           resultDesc
         );
+        const io = req.app.get('io') || null;
+        if (failedPayment) {
+          emitPaymentStatusUpdate(io, failedPayment, {
+            route_name: null,
+            amount: failedPayment.amount,
+          });
+        }
         console.log('M-Pesa payment failed:', resultDesc);
       }
 
@@ -425,6 +465,7 @@ class PaymentController {
   // Simulate M-Pesa payment (FR2)
   static async simulatePayment(req, res) {
     try {
+      const io = req.app.get('io') || null;
       const userId = req.userId || null;
       const { routeId, amount, phoneNumber } = req.body;
 
@@ -449,7 +490,19 @@ class PaymentController {
 
       // Simulate successful payment after 2 seconds
       setTimeout(async () => {
-        await PaymentModel.updatePaymentStatus(payment.id, 'completed', simulatedTransactionId);
+        try {
+          const updatedPayment = await PaymentModel.updatePaymentStatus(payment.id, 'completed', simulatedTransactionId);
+          if (updatedPayment) {
+            const paymentWithDetails = await PaymentModel.getPaymentByIdWithDetails(updatedPayment.id) || updatedPayment;
+            emitPaymentStatusUpdate(io, paymentWithDetails, {
+              ticket_reference: getSafeTicketReference(paymentWithDetails),
+              route_name: paymentWithDetails.route_name || null,
+              amount: paymentWithDetails.amount,
+            });
+          }
+        } catch (simulateUpdateError) {
+          console.error('Simulated payment completion update error:', simulateUpdateError.message);
+        }
       }, 2000);
 
       // Send SMS notification (FR4)
@@ -522,7 +575,11 @@ class PaymentController {
         return res.status(404).json({ message: 'Payment not found' });
       }
 
-      if (shouldRefresh && payment.status === 'pending') {
+      const lastUpdatedAt = payment.updated_at ? new Date(payment.updated_at).getTime() : 0;
+      const pendingStaleMs = lastUpdatedAt ? Date.now() - lastUpdatedAt : Number.POSITIVE_INFINITY;
+      const shouldAutoRefreshPending = payment.status === 'pending' && pendingStaleMs > STK_QUERY_MIN_INTERVAL_MS;
+
+      if ((shouldRefresh || shouldAutoRefreshPending) && payment.status === 'pending') {
         const io = req.app.get('io') || null;
         payment = await PaymentController.reconcilePendingPayment(payment, io);
         payment = await PaymentModel.getPaymentByIdWithDetails(paymentId) || payment;
