@@ -212,7 +212,7 @@ const PaymentSimulation = ({
     setPaymentStatus('success');
     setIsProcessing(false);
     showPaymentToast({ title: 'Payment Confirmed', description: `Ticket: ${ref}` });
-    setTimeout(() => setShowTicket(true), 300);
+    setShowTicket(true);
   };
 
   const applyFailedPayment = (payment: any) => {

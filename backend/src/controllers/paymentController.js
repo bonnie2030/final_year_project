@@ -40,6 +40,8 @@ const isTruthyRefresh = (value) => {
 
 const STK_QUERY_MIN_INTERVAL_MS = 2000;
 const STK_RATE_LIMIT_COOLDOWN_MS = 65000;
+const STK_TERMINAL_FAILURE_CODES = new Set(['1', '17', '26', '1032', '1037', '2001']);
+const STK_FAILURE_GRACE_MS = 15000;
 const stkQueryLastRunByCheckout = new Map();
 
 const emitPaymentStatusUpdate = (io, payment, extras = {}) => {
@@ -197,7 +199,11 @@ class PaymentController {
         }
       }
 
-      if (resultCode && resultCode !== '1032' && resultCode !== '1') {
+      const paymentAgeMs = payment?.created_at ? Date.now() - new Date(payment.created_at).getTime() : 0;
+      const isTerminalFailure = STK_TERMINAL_FAILURE_CODES.has(resultCode);
+      const canFinalizeFailure = isTerminalFailure && paymentAgeMs >= STK_FAILURE_GRACE_MS;
+
+      if (canFinalizeFailure) {
         const updatedFailed = await PaymentModel.updateStatusByCheckoutRequestId(
           payment.checkout_request_id,
           'failed',
@@ -211,6 +217,10 @@ class PaymentController {
           });
         }
         return updatedFailed || payment;
+      }
+
+      if (resultCode && resultCode !== '0' && !canFinalizeFailure) {
+        return payment;
       }
 
       return payment;
@@ -567,6 +577,11 @@ class PaymentController {
   // Get payment status
   static async getPaymentStatus(req, res) {
     try {
+      res.set('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
+      res.set('Pragma', 'no-cache');
+      res.set('Expires', '0');
+      res.set('Surrogate-Control', 'no-store');
+
       const { paymentId } = req.params;
       const shouldRefresh = isTruthyRefresh(req.query.refresh);
 

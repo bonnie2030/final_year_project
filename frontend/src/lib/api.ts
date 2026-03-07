@@ -52,6 +52,7 @@ async function apiFetch<T>(
 
   const config: RequestInit = {
     ...options,
+    cache: 'no-store',
     headers: {
       ...defaultHeaders,
       ...options.headers,
@@ -132,7 +133,13 @@ export const api = {
       body: JSON.stringify(data),
     }),
     getAll: () => apiFetch<any[]>('/api/payments'),
-    getById: (id: number, refresh = false) => apiFetch<any>(`/api/payments/${id}${refresh ? '?refresh=1' : ''}`),
+    getById: (id: number, refresh = false) => {
+      const qs = new URLSearchParams();
+      if (refresh) qs.set('refresh', '1');
+      qs.set('_ts', String(Date.now()));
+      const query = qs.toString() ? `?${qs.toString()}` : '';
+      return apiFetch<any>(`/api/payments/${id}${query}`);
+    },
   },
 
   // Feedback
