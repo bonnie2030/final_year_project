@@ -4,6 +4,7 @@ const WhatsappService = require('../services/whatsappService');
 const UserModel = require('../models/userModel');
 const MpesaService = require('../services/mpesaService');
 const VehicleModel = require('../models/vehicleModel');
+const DriverModel = require('../models/driverModel');
 const OccupancyModel = require('../models/occupancyModel');
 const pool = require('../config/database');
 
@@ -39,10 +40,17 @@ const isTruthyRefresh = (value) => {
 };
 
 const STK_QUERY_MIN_INTERVAL_MS = 2000;
-const STK_RATE_LIMIT_COOLDOWN_MS = 65000;
+const STK_RATE_LIMIT_COOLDOWN_MS = 8000;
 const STK_TERMINAL_FAILURE_CODES = new Set(['1', '17', '26', '1032', '1037', '2001']);
 const STK_FAILURE_GRACE_MS = 15000;
+const STK_TIMEOUT_FAILURE_GRACE_MS = 60000;
+const STK_TIMEOUT_FAILURE_THRESHOLD = 2;
 const stkQueryLastRunByCheckout = new Map();
+const stkTimeoutCountByCheckout = new Map();
+
+const paymentDebugLog = (event, meta = {}) => {
+  console.log(`[PAYMENT_DEBUG] ${new Date().toISOString()} ${event}`, meta);
+};
 
 const emitPaymentStatusUpdate = (io, payment, extras = {}) => {
   if (!io || !payment?.id) return;
@@ -61,6 +69,50 @@ const emitPaymentStatusUpdate = (io, payment, extras = {}) => {
 };
 
 class PaymentController {
+  static async sendPaymentWhatsAppNotifications(paymentRecord, ticketReference) {
+    if (!paymentRecord) return;
+
+    try {
+      if (paymentRecord.phone_number) {
+        await WhatsappService.sendPaymentConfirmation(paymentRecord.phone_number, {
+          routeName: paymentRecord.route_name || `Route ${paymentRecord.route_id}`,
+          vehicleNumber: paymentRecord.vehicle_number || 'N/A',
+          amount: paymentRecord.amount,
+          transactionId: ticketReference,
+        });
+      }
+    } catch (whatsappError) {
+      console.error('WhatsApp notification to customer failed:', whatsappError.message);
+    }
+
+    if (paymentRecord.vehicle_id) {
+      try {
+        const driver = await DriverModel.getDriverByVehicleId(paymentRecord.vehicle_id);
+        if (driver && driver.phone) {
+          await WhatsappService.sendPaymentConfirmation(driver.phone, {
+            routeName: paymentRecord.route_name || `Route ${paymentRecord.route_id}`,
+            vehicleNumber: paymentRecord.vehicle_number || 'N/A',
+            amount: paymentRecord.amount,
+            transactionId: ticketReference,
+            recipientType: 'driver',
+          });
+        }
+      } catch (driverError) {
+        console.error('WhatsApp notification to driver failed:', driverError.message);
+      }
+    }
+  }
+
+  static queuePaymentWhatsAppNotifications(paymentRecord, ticketReference) {
+    setImmediate(async () => {
+      try {
+        await PaymentController.sendPaymentWhatsAppNotifications(paymentRecord, ticketReference);
+      } catch (error) {
+        console.error('Queued WhatsApp notifications failed:', error.message);
+      }
+    });
+  }
+
   // Auto-increment vehicle occupancy when a payment completes.
   // Assigns vehicle_id to the payment if not set, then increments occupancy of the active vehicle.
   static async autoIncrementOccupancy(payment, io = null) {
@@ -114,10 +166,22 @@ class PaymentController {
       return payment;
     }
 
+    paymentDebugLog('reconcile.start', {
+      paymentId: payment.id,
+      checkoutRequestId: payment.checkout_request_id,
+      currentStatus: payment.status,
+      updatedAt: payment.updated_at,
+    });
+
     const checkoutId = payment.checkout_request_id;
     const now = Date.now();
     const lastRunAt = stkQueryLastRunByCheckout.get(checkoutId) || 0;
     if (now - lastRunAt < STK_QUERY_MIN_INTERVAL_MS) {
+      paymentDebugLog('reconcile.skipped.min_interval', {
+        paymentId: payment.id,
+        checkoutRequestId: checkoutId,
+        millisSinceLastRun: now - lastRunAt,
+      });
       return payment;
     }
 
@@ -125,8 +189,28 @@ class PaymentController {
 
     try {
       const statusResponse = await MpesaService.queryStkPushStatus(payment.checkout_request_id);
-      const resultCode = String(statusResponse?.ResultCode ?? '');
-      const resultDesc = statusResponse?.ResultDesc || statusResponse?.errorMessage || 'Pending confirmation';
+      const resultCode = String(
+        statusResponse?.ResultCode
+        ?? statusResponse?.Body?.stkCallback?.ResultCode
+        ?? statusResponse?.resultCode
+        ?? ''
+      );
+      const resultDesc =
+        statusResponse?.ResultDesc
+        || statusResponse?.Body?.stkCallback?.ResultDesc
+        || statusResponse?.errorMessage
+        || statusResponse?.resultDesc
+        || 'Pending confirmation';
+
+      // Query reached provider and returned a response; reset timeout counter.
+      stkTimeoutCountByCheckout.delete(checkoutId);
+
+      paymentDebugLog('reconcile.query.result', {
+        paymentId: payment.id,
+        checkoutRequestId: payment.checkout_request_id,
+        resultCode,
+        resultDesc,
+      });
 
       if (resultCode === '0') {
         const transactionId = statusResponse?.MpesaReceiptNumber || payment.checkout_request_id;
@@ -141,60 +225,22 @@ class PaymentController {
           const paymentWithDetails = await PaymentModel.getPaymentByIdWithDetails(updated.id);
           const ticketReference = getSafeTicketReference(paymentWithDetails || updated);
 
-          let customerWhatsappStatus = { sent: false, error: null };
-          let driverWhatsappStatus = { sent: false, error: null };
-
-          // Send to customer
-          try {
-            const whatsappResult = await WhatsappService.sendPaymentConfirmation(updated.phone_number, {
-              routeName: paymentWithDetails?.route_name || `Route ${updated.route_id}`,
-              vehicleNumber: paymentWithDetails?.vehicle_number || 'N/A',
-              amount: updated.amount,
-              transactionId: ticketReference,
-            });
-            customerWhatsappStatus.sent = whatsappResult?.success !== false;
-            if (!customerWhatsappStatus.sent) {
-              customerWhatsappStatus.error = whatsappResult?.error || 'WhatsApp send failed';
-            }
-          } catch (whatsappError) {
-            console.error('WhatsApp send to customer failed:', whatsappError.message);
-            customerWhatsappStatus.error = whatsappError.message;
-          }
-
-          // Send to driver if vehicle assigned
-          if (paymentWithDetails?.vehicle_id) {
-            try {
-              const DriverModel = require('../models/driverModel');
-              const driver = await DriverModel.getDriverByVehicleId(paymentWithDetails.vehicle_id);
-              if (driver && driver.phone) {
-                const driverWhatsappResult = await WhatsappService.sendPaymentConfirmation(driver.phone, {
-                  routeName: paymentWithDetails?.route_name || `Route ${updated.route_id}`,
-                  vehicleNumber: paymentWithDetails?.vehicle_number || 'N/A',
-                  amount: updated.amount,
-                  transactionId: ticketReference,
-                  recipientType: 'driver',
-                });
-                driverWhatsappStatus.sent = driverWhatsappResult?.success !== false;
-                if (!driverWhatsappStatus.sent) {
-                  driverWhatsappStatus.error = driverWhatsappResult?.error || 'WhatsApp send failed';
-                }
-              }
-            } catch (driverError) {
-              console.error('WhatsApp send to driver failed:', driverError.message);
-              driverWhatsappStatus.error = driverError.message;
-            }
-          }
-
           const result = paymentWithDetails || updated;
-          result.whatsapp_status = customerWhatsappStatus;
-          result.driver_whatsapp_status = driverWhatsappStatus;
           emitPaymentStatusUpdate(io, result, {
             ticket_reference: ticketReference,
             route_name: result.route_name || null,
             amount: result.amount,
           });
+          PaymentController.queuePaymentWhatsAppNotifications(result, ticketReference);
           // Auto-increment vehicle occupancy from this completed payment
           await PaymentController.autoIncrementOccupancy(updated, io);
+          paymentDebugLog('reconcile.marked.completed', {
+            paymentId: updated.id,
+            checkoutRequestId: updated.checkout_request_id,
+            transactionId: updated.transaction_id,
+            ticketReference,
+          });
+          stkTimeoutCountByCheckout.delete(checkoutId);
           return result;
         }
       }
@@ -216,6 +262,13 @@ class PaymentController {
             amount: payment.amount,
           });
         }
+        paymentDebugLog('reconcile.marked.failed', {
+          paymentId: payment.id,
+          checkoutRequestId: payment.checkout_request_id,
+          resultCode,
+          resultDesc,
+        });
+        stkTimeoutCountByCheckout.delete(checkoutId);
         return updatedFailed || payment;
       }
 
@@ -226,9 +279,72 @@ class PaymentController {
       return payment;
     } catch (error) {
       const errorCode = error?.response?.data?.fault?.detail?.errorcode;
-      if (errorCode === 'policies.ratelimit.SpikeArrestViolation') {
-        stkQueryLastRunByCheckout.set(checkoutId, now + STK_RATE_LIMIT_COOLDOWN_MS);
+      const isTimeoutError =
+        error?.code === 'ECONNABORTED'
+        || /timeout/i.test(String(error?.message || ''));
+
+      if (isTimeoutError) {
+        const timeoutCount = (stkTimeoutCountByCheckout.get(checkoutId) || 0) + 1;
+        stkTimeoutCountByCheckout.set(checkoutId, timeoutCount);
+
+        const paymentAgeMs = payment?.created_at ? Date.now() - new Date(payment.created_at).getTime() : 0;
+        const shouldFailOnTimeouts =
+          timeoutCount >= STK_TIMEOUT_FAILURE_THRESHOLD
+          && paymentAgeMs >= STK_TIMEOUT_FAILURE_GRACE_MS;
+
+        paymentDebugLog('reconcile.timeout.progress', {
+          paymentId: payment.id,
+          checkoutRequestId: checkoutId,
+          timeoutCount,
+          paymentAgeMs,
+          threshold: STK_TIMEOUT_FAILURE_THRESHOLD,
+          graceMs: STK_TIMEOUT_FAILURE_GRACE_MS,
+          shouldFailOnTimeouts,
+        });
+
+        if (shouldFailOnTimeouts) {
+          const timeoutFailureReason = 'Payment confirmation timed out. Please retry payment.';
+          const updatedFailed = await PaymentModel.updateStatusByCheckoutRequestId(
+            payment.checkout_request_id,
+            'failed',
+            null,
+            timeoutFailureReason
+          );
+
+          if (updatedFailed) {
+            emitPaymentStatusUpdate(io, updatedFailed, {
+              route_name: payment.route_name || null,
+              amount: payment.amount,
+            });
+          }
+
+          paymentDebugLog('reconcile.marked.failed.timeout_fallback', {
+            paymentId: payment.id,
+            checkoutRequestId: checkoutId,
+            timeoutCount,
+            paymentAgeMs,
+          });
+
+          stkTimeoutCountByCheckout.delete(checkoutId);
+          return updatedFailed || payment;
+        }
       }
+
+      if (errorCode === 'policies.ratelimit.SpikeArrestViolation') {
+        // Back off briefly, but avoid minute-long freeze in UI confirmation.
+        stkQueryLastRunByCheckout.set(checkoutId, now - STK_QUERY_MIN_INTERVAL_MS + STK_RATE_LIMIT_COOLDOWN_MS);
+        paymentDebugLog('reconcile.ratelimited', {
+          paymentId: payment.id,
+          checkoutRequestId: checkoutId,
+          cooldownMs: STK_RATE_LIMIT_COOLDOWN_MS,
+        });
+      }
+      paymentDebugLog('reconcile.query.error', {
+        paymentId: payment.id,
+        checkoutRequestId: checkoutId,
+        errorCode,
+        message: error.message,
+      });
       console.warn('STK fallback query skipped:', error.response?.data || error.message);
       return payment;
     }
@@ -307,6 +423,15 @@ class PaymentController {
           response.CheckoutRequestID
         );
 
+        paymentDebugLog('initiate.success', {
+          paymentId: paymentRecord.id,
+          routeId: parsedRouteId,
+          amount: parsedAmount,
+          checkoutRequestId: response.CheckoutRequestID,
+          merchantRequestId: response.MerchantRequestID,
+          phoneNumber: normalizedPhone,
+        });
+
         return res.status(200).json({
           success: true,
           message: 'Check your phone for M-Pesa prompt!',
@@ -361,6 +486,12 @@ class PaymentController {
       const checkoutRequestId =
         callbackBody?.Body?.stkCallback?.CheckoutRequestID ?? callbackBody?.CheckoutRequestID;
 
+      paymentDebugLog('callback.received', {
+        checkoutRequestId,
+        resultCode: String(resultCode),
+        resultDesc,
+      });
+
       const metadataItems = callbackBody?.Body?.stkCallback?.CallbackMetadata?.Item || [];
       const metadata = metadataItems.reduce((acc, item) => {
         if (item?.Name) {
@@ -399,53 +530,14 @@ class PaymentController {
           amount: updatedPayment.amount,
         });
 
-        let customerWhatsappStatus = { sent: false, error: null };
-        let driverWhatsappStatus = { sent: false, error: null };
-
-        // Send to customer
-        try {
-          const whatsappResult = await WhatsappService.sendPaymentConfirmation(updatedPayment.phone_number, {
-            routeName: paymentWithDetails?.route_name || `Route ${updatedPayment.route_id}`,
-            vehicleNumber: paymentWithDetails?.vehicle_number || 'N/A',
-            amount: updatedPayment.amount,
-            transactionId: ticketReference,
-          });
-          customerWhatsappStatus.sent = whatsappResult?.success !== false;
-          if (!customerWhatsappStatus.sent) {
-            customerWhatsappStatus.error = whatsappResult?.error || 'WhatsApp send failed';
-          }
-          console.log('✓ WhatsApp payment confirmation sent to customer from callback');
-        } catch (whatsappError) {
-          console.error('WhatsApp callback notification to customer failed:', whatsappError.message);
-          customerWhatsappStatus.error = whatsappError.message;
-        }
-
-        // Send to driver if vehicle assigned
-        if (paymentWithDetails?.vehicle_id) {
-          try {
-            const DriverModel = require('../models/driverModel');
-            const driver = await DriverModel.getDriverByVehicleId(paymentWithDetails.vehicle_id);
-            if (driver && driver.phone) {
-              const driverWhatsappResult = await WhatsappService.sendPaymentConfirmation(driver.phone, {
-                routeName: paymentWithDetails?.route_name || `Route ${updatedPayment.route_id}`,
-                vehicleNumber: paymentWithDetails?.vehicle_number || 'N/A',
-                amount: updatedPayment.amount,
-                transactionId: ticketReference,
-                recipientType: 'driver',
-              });
-              driverWhatsappStatus.sent = driverWhatsappResult?.success !== false;
-              if (!driverWhatsappStatus.sent) {
-                driverWhatsappStatus.error = driverWhatsappResult?.error || 'WhatsApp send failed';
-              }
-              console.log('✓ WhatsApp payment confirmation sent to driver from callback');
-            }
-          } catch (driverError) {
-            console.error('WhatsApp callback notification to driver failed:', driverError.message);
-            driverWhatsappStatus.error = driverError.message;
-          }
-        }
+        PaymentController.queuePaymentWhatsAppNotifications(paymentWithDetails || updatedPayment, ticketReference);
 
         console.log(`✓ Payment verified and completed for payment_id=${updatedPayment.id}`);
+        paymentDebugLog('callback.marked.completed', {
+          paymentId: updatedPayment.id,
+          checkoutRequestId,
+          transactionId: updatedPayment.transaction_id,
+        });
         // Auto-increment vehicle occupancy from this completed payment
         await PaymentController.autoIncrementOccupancy(updatedPayment, io);
       } else {
@@ -463,6 +555,12 @@ class PaymentController {
           });
         }
         console.log('M-Pesa payment failed:', resultDesc);
+        paymentDebugLog('callback.marked.failed', {
+          paymentId: failedPayment?.id || null,
+          checkoutRequestId,
+          resultCode: String(resultCode),
+          resultDesc,
+        });
       }
 
       res.status(200).send('Success');
@@ -528,47 +626,37 @@ class PaymentController {
         }
       }, 2000);
 
-      // Send SMS notification (FR4)
-      let smsSent = false;
-      let whatsappSent = false;
-      try {
-        await SmsService.sendSms(
-          phoneNumber,
-          `M-Pesa Payment Simulated: KES ${amount} for route. Transaction ID: ${simulatedTransactionId}`
-        );
-        smsSent = true;
-      } catch (smsError) {
-        console.error('SMS notification failed:', smsError);
-      }
+      // Send notifications asynchronously so API responds immediately
+      setImmediate(async () => {
+        try {
+          await SmsService.sendSms(
+            phoneNumber,
+            `M-Pesa Payment Simulated: KES ${amount} for route. Transaction ID: ${simulatedTransactionId}`
+          );
+        } catch (smsError) {
+          console.error('SMS notification failed:', smsError);
+        }
 
-      // Send WhatsApp notification
-      try {
-        const whatsappResult = await WhatsappService.sendPaymentConfirmation(phoneNumber, {
-          routeName: `Route ${routeId}`,
-          vehicleNumber: incomingVehicle || undefined,
-          amount: amount,
-          transactionId: simulatedTransactionId
-        });
-        whatsappSent = whatsappResult.success !== false;
-        if (whatsappSent) {
-          console.log('✓ WhatsApp payment confirmation sent');
-        } else {
-          console.warn('⚠️ WhatsApp payment confirmation failed:', whatsappResult.error);
-          
-          // If user not in sandbox (error 63007), send SMS with join instructions
-          if (whatsappResult.needsJoin || whatsappResult.code === 63007) {
+        try {
+          const whatsappResult = await WhatsappService.sendPaymentConfirmation(phoneNumber, {
+            routeName: `Route ${routeId}`,
+            vehicleNumber: incomingVehicle || undefined,
+            amount: amount,
+            transactionId: simulatedTransactionId
+          });
+
+          if (whatsappResult?.success === false && (whatsappResult.needsJoin || whatsappResult.code === 63007)) {
             try {
               const joinInstructions = `MatatuConnect: Payment received KES ${amount}! Get WhatsApp alerts - Send "join break-additional" to +14155238886. Takes 5 sec!`;
               await SmsService.sendSms(phoneNumber, joinInstructions);
-              console.log('✓ SMS join instructions sent as fallback');
             } catch (smsFallbackError) {
               console.error('SMS join instructions failed:', smsFallbackError.message);
             }
           }
+        } catch (whatsappError) {
+          console.error('WhatsApp notification failed:', whatsappError.message);
         }
-      } catch (whatsappError) {
-        console.error('WhatsApp notification failed:', whatsappError.message);
-      }
+      });
 
       res.status(201).json({
         message: 'M-Pesa STK simulation initiated',
@@ -578,8 +666,9 @@ class PaymentController {
         },
         simulatedStatus: 'STK Prompt Sent (Simulated)',
         notificationsSent: {
-          sms: smsSent,
-          whatsapp: whatsappSent
+          sms: false,
+          whatsapp: false,
+          queued: true
         }
       });
     } catch (error) {
@@ -608,6 +697,15 @@ class PaymentController {
       const pendingStaleMs = lastUpdatedAt ? Date.now() - lastUpdatedAt : Number.POSITIVE_INFINITY;
       const shouldAutoRefreshPending = payment.status === 'pending' && pendingStaleMs > STK_QUERY_MIN_INTERVAL_MS;
 
+      paymentDebugLog('status.request', {
+        paymentId: Number(paymentId),
+        checkoutRequestId: payment.checkout_request_id,
+        currentStatus: payment.status,
+        shouldRefresh,
+        shouldAutoRefreshPending,
+        pendingStaleMs,
+      });
+
       if ((shouldRefresh || shouldAutoRefreshPending) && payment.status === 'pending') {
         const io = req.app.get('io') || null;
         payment = await PaymentController.reconcilePendingPayment(payment, io);
@@ -629,6 +727,14 @@ class PaymentController {
               paidAt: payment.updated_at,
             }
           : null,
+      });
+
+      paymentDebugLog('status.response', {
+        paymentId: Number(paymentId),
+        checkoutRequestId: payment.checkout_request_id,
+        responseStatus: payment.status,
+        transactionId: payment.transaction_id || null,
+        failureReason: payment.failure_reason || null,
       });
     } catch (error) {
       console.error('Get payment status error:', error);

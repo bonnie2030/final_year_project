@@ -54,6 +54,8 @@ const PaymentSimulation = ({
   const [paymentStatus, setPaymentStatus] = useState<'idle' | 'processing' | 'success' | 'failed'>('idle');
   const { toast } = useToast();
   const pollingIdRef = useRef<number | null>(null);
+  const pollInFlightRef = useRef(false);
+  const consecutivePollErrorsRef = useRef(0);
   const paymentSocketRef = useRef<Socket | null>(null);
   const paymentResolvedRef = useRef(false);
   const paymentMode = String(import.meta.env.VITE_PAYMENT_MODE || 'mpesa').toLowerCase();
@@ -187,13 +189,17 @@ const PaymentSimulation = ({
   const selectedRoute = availableRoutes.find((r) => r.id === selectedRouteId);
   const fare = selectedRoute?.fare ?? initialRouteFallback?.fare ?? 0;
   const pollIntervalMs = 1000;
-  const refreshEveryAttempts = 1;
+  const refreshEveryAttempts = 3;
+  const pendingWarningAttempt = 12;
+  const maxLivePollAttempts = 45;
 
   const stopPolling = () => {
     if (pollingIdRef.current) {
       window.clearInterval(pollingIdRef.current);
       pollingIdRef.current = null;
     }
+    pollInFlightRef.current = false;
+    consecutivePollErrorsRef.current = 0;
   };
 
   const closePaymentSocket = () => {
@@ -290,10 +296,16 @@ const PaymentSimulation = ({
         return;
       }
 
+      if (pollInFlightRef.current) {
+        return;
+      }
+
       attempts += 1;
+      pollInFlightRef.current = true;
       try {
         const shouldRefresh = useLiveMpesa && (attempts === 1 || attempts % refreshEveryAttempts === 0);
         const statusRes = await api.payments.getById(paymentId, shouldRefresh);
+        consecutivePollErrorsRef.current = 0;
         const payment = statusRes.payment || statusRes;
 
         if (payment?.status === 'completed') {
@@ -312,16 +324,39 @@ const PaymentSimulation = ({
           return;
         }
       } catch {
+        consecutivePollErrorsRef.current += 1;
+        if (consecutivePollErrorsRef.current >= 5) {
+          stopPolling();
+          closePaymentSocket();
+          setIsProcessing(false);
+          setPaymentStatus('failed');
+          showPaymentToast({
+            title: 'Could Not Verify Payment',
+            description: 'We are unable to confirm payment status right now. Please retry shortly.',
+            variant: 'destructive',
+          });
+          return;
+        }
+      } finally {
+        pollInFlightRef.current = false;
       }
 
       if (attempts >= maxAttempts) {
         stopPolling();
         closePaymentSocket();
         setIsProcessing(false);
-        setPaymentStatus('idle');
+        setPaymentStatus('failed');
         showPaymentToast({
-          title: 'Still Waiting',
-          description: 'Complete the M-Pesa prompt on your phone. Ticket will appear once verified.',
+          title: 'Payment Not Confirmed',
+          description: 'Confirmation took too long. Please retry payment. If you were charged, do not pay again until support verifies your transaction.',
+          variant: 'destructive',
+        });
+      }
+
+      if (attempts === pendingWarningAttempt && !paymentResolvedRef.current) {
+        showPaymentToast({
+          title: 'Still Verifying Payment',
+          description: 'We are still waiting for M-Pesa confirmation from provider. Keep this page open for a little longer.',
         });
       }
     }, pollIntervalMs);
@@ -380,7 +415,7 @@ const PaymentSimulation = ({
             description: 'Check your phone for the M-Pesa prompt and enter your PIN.',
           });
           setupPaymentSocket(Number(res.payment_id));
-          pollPaymentUntilResolved(Number(res.payment_id), 120);
+          pollPaymentUntilResolved(Number(res.payment_id), maxLivePollAttempts);
         } else {
           setPaymentStatus('failed');
           showPaymentToast({
