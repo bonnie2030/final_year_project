@@ -10,6 +10,7 @@ import { Label } from "@/components/ui/label";
 
 const DEMO_EMAIL = "admin@matatuconnect.test";
 const DEMO_PASSWORD = "Admin@Matatu2024!";
+const normalizeEmail = (value: string) => value.trim().toLowerCase();
 
 const AdminLogin = () => {
   const [email, setEmail] = useState("");
@@ -84,12 +85,15 @@ const AdminLogin = () => {
     setIsLoading(true);
 
     try {
-      const isDemo = email.trim() === DEMO_EMAIL && password === DEMO_PASSWORD;
+      const cleanEmail = normalizeEmail(email);
+      const isDemoEmail = cleanEmail === normalizeEmail(DEMO_EMAIL);
+      const isDemoPassword = password === DEMO_PASSWORD || password.trim() === DEMO_PASSWORD;
+      const isDemo = isDemoEmail;
       const endpoint = isDemo ? '/api/auth/demo_login' : '/api/auth/login';
       const res = await fetch((import.meta.env.VITE_API_URL || '') + endpoint, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email, password })
+        body: JSON.stringify({ email: email.trim(), password: password.trim() })
       });
       const data = await res.json();
       if (res.ok) {
@@ -101,7 +105,10 @@ const AdminLogin = () => {
         toast({ title: 'Welcome back!', description: 'Admin portal access granted.' });
         navigate('/admin/dashboard');
       } else {
-        toast({ title: 'Login Failed', description: data.message || 'Invalid credentials', variant: 'destructive' });
+        const loginMessage = isDemo && !isDemoPassword
+          ? 'Use the exact demo password shown below or click Quick Demo Login.'
+          : (data.message || 'Invalid credentials');
+        toast({ title: 'Login Failed', description: loginMessage, variant: 'destructive' });
       }
     } catch (err: any) {
       toast({ title: 'Login Failed', description: err.message || 'Error', variant: 'destructive' });

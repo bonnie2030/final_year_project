@@ -28,7 +28,7 @@ import { Helmet } from 'react-helmet-async';
 import { useToast } from '@/hooks/use-toast';
 import { cn } from '@/lib/utils';
 import RouteManager from '@/components/admin/RouteManager';
-import OccupancyManager from '@/components/admin/OccupancyManager';
+import OccupancyOverview from '@/components/admin/OccupancyOverview';
 import DriverManager from '@/components/admin/DriverManager';
 import VehicleManager from '@/components/admin/VehicleManager';
 import AdminRevenue from '@/components/admin/AdminRevenue';
@@ -114,8 +114,8 @@ const AdminDashboard = () => {
 
   // Fetch payments from database
   const { data: paymentsResponse } = useQuery({
-    queryKey: ['admin', 'payments', selectedStation],
-    queryFn: () => api.admin.getPayments({ limit: 1000, station: selectedStation || undefined }),
+    queryKey: ['admin', 'payments'],
+    queryFn: () => api.admin.getPayments({ limit: 1000 }),
     refetchInterval: 30000,
   });
 
@@ -387,7 +387,9 @@ const AdminDashboard = () => {
     refetchInterval: 15000,
   });
   useEffect(() => {
-    const socket = io();
+    const socket = API_BASE
+      ? io(API_BASE, { transports: ['websocket', 'polling'] })
+      : io();
 
     socket.on('connect', () => {
       socket.emit('join', 'admin');
@@ -395,7 +397,7 @@ const AdminDashboard = () => {
 
     socket.on('booking.created', (payload: any) => {
       toast({ title: 'New booking', description: 'A booking was just created', variant: 'default' });
-      queryClient.invalidateQueries({ queryKey: ['payments'] });
+      queryClient.invalidateQueries({ queryKey: ['admin', 'payments'] });
     });
 
     socket.on('trip.updated', (trip: any) => {
@@ -407,10 +409,21 @@ const AdminDashboard = () => {
       toast({ title: 'Driver status', description: `${payload.username || payload.userId} is ${payload.status}`, variant: 'default' });
     });
 
+    socket.on('payment.statusUpdated', (payload: any) => {
+      queryClient.invalidateQueries({ queryKey: ['admin', 'payments'] });
+      queryClient.invalidateQueries({ queryKey: ['admin', 'dashboard'] });
+    });
+
+    socket.on('vehicle.occupancyUpdated', () => {
+      queryClient.invalidateQueries({ queryKey: ['occupancy'] });
+    });
+
     return () => {
       socket.off('booking.created');
       socket.off('trip.updated');
       socket.off('driver.statusUpdated');
+      socket.off('payment.statusUpdated');
+      socket.off('vehicle.occupancyUpdated');
       socket.disconnect();
     };
   }, [queryClient, toast]);
@@ -907,16 +920,24 @@ const AdminDashboard = () => {
                 </TabsContent>
 
                 <TabsContent value="drivers" className="animate-fade-in m-0">
-                  <div className="p-2">
-                    <h3 className="font-semibold mb-3">Driver Management</h3>
-                    <div className="bg-muted rounded-lg p-4">
-                      <DriverManager />
-                      <div className="mt-6">
-                        <h4 className="font-semibold mb-2">Messages</h4>
-                        <div className="bg-white p-3 rounded">
-                          <AdminMessages />
+                  <div className="p-2 space-y-4">
+                    <div className="grid grid-cols-1 xl:grid-cols-12 gap-4">
+                      <section className="xl:col-span-8 rounded-xl border border-gray-200 bg-white shadow-sm p-4 sm:p-5">
+                        <h3 className="font-semibold mb-3">Driver Management</h3>
+                        <DriverManager />
+                      </section>
+
+                      <aside className="xl:col-span-4 xl:sticky xl:top-4 h-fit">
+                        <div className="rounded-xl border border-teal-200 bg-gradient-to-br from-teal-50 to-cyan-50 shadow-sm p-4 sm:p-5">
+                          <h4 className="font-semibold mb-3 flex items-center gap-2 text-teal-900">
+                            <MessageSquare className="h-4 w-4" />
+                            Messages
+                          </h4>
+                          <div className="bg-white rounded-lg border border-teal-100 p-3">
+                            <AdminMessages />
+                          </div>
                         </div>
-                      </div>
+                      </aside>
                     </div>
                   </div>
                 </TabsContent>
@@ -948,8 +969,7 @@ const AdminDashboard = () => {
                 <TabsContent value="occupancy" className="animate-fade-in m-0">
                   <div className="max-w-5xl mx-auto space-y-6">
                     <section className="bg-white rounded-xl border border-gray-200 shadow-sm p-4 sm:p-5">
-                      <h3 className="font-semibold mb-4">Occupancy Control</h3>
-                      <OccupancyManager station={selectedStation} />
+                      <OccupancyOverview station={selectedStation} />
                     </section>
 
                     <section className="bg-white rounded-xl border border-gray-200 shadow-sm p-4 sm:p-6">

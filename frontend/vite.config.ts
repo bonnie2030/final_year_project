@@ -38,6 +38,11 @@ export default defineConfig(({ mode }) => {
           secure: false,
           ws: true,
         },
+        '/uploads': {
+          target: apiUrl,
+          changeOrigin: true,
+          secure: false,
+        },
       },
     },
     plugins: [react(), mode === "development" && componentTagger()].filter(Boolean),

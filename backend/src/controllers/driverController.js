@@ -154,6 +154,7 @@ class DriverController {
         email: driver.email,
         phone: driver.phone,
         vehicle_reg: driver.vehicle_reg,
+        profile_image: driver.profile_image || null,
         driving_license: driver.driving_license,
         status: driver.status,
       }));
@@ -462,6 +463,27 @@ class DriverController {
     }
   }
 
+  static async uploadDriverPhoto(req, res) {
+    try {
+      const userId = parseInt(req.params.userId, 10);
+      if (!userId) return res.status(400).json({ message: 'Invalid userId' });
+      if (!req.file) return res.status(400).json({ message: 'Photo file is required' });
+
+      const profileImagePath = `/uploads/drivers/${req.file.filename}`;
+      const updatedUser = await UserModel.updateProfileImage(userId, profileImagePath);
+      if (!updatedUser) return res.status(404).json({ message: 'Driver user not found' });
+
+      res.json({
+        message: 'Driver photo uploaded',
+        user: updatedUser,
+        profile_image: updatedUser.profile_image,
+      });
+    } catch (error) {
+      console.error('Upload driver photo error:', error.message);
+      res.status(500).json({ message: 'Failed to upload driver photo', error: error.message });
+    }
+  }
+
   static async deleteDriver(req, res) {
     try {
       const userId = parseInt(req.params.userId, 10);
@@ -542,14 +564,18 @@ class DriverController {
         FROM payments p
         LEFT JOIN routes r ON p.route_id = r.id
         LEFT JOIN vehicles v ON p.vehicle_id = v.id
-        WHERE p.vehicle_id = $1 AND p.status = 'completed'
+        WHERE p.status = 'completed'
+          AND (
+            p.vehicle_id = $1
+            OR UPPER(REPLACE(REPLACE(v.registration_number, '-', ''), ' ', '')) = UPPER(REPLACE(REPLACE($2, '-', ''), ' ', ''))
+          )
         ORDER BY p.created_at DESC
         LIMIT 100
       `;
       
       console.log('Executing query for vehicle_id:', driver.assigned_vehicle_id);
       
-      const result = await pool.query(query, [driver.assigned_vehicle_id]);
+      const result = await pool.query(query, [driver.assigned_vehicle_id, driver.vehicle_reg || '']);
       
       console.log('Found', result.rows.length, 'tickets for vehicle', driver.assigned_vehicle_id);
       
@@ -652,6 +678,23 @@ class DriverController {
       } catch (whatsappErr) {
         console.error('WhatsApp notification failed:', whatsappErr.message);
         // Don't fail the whole request if WhatsApp fails
+      }
+
+      // Emit socket event to admin and driver so UI updates in real-time
+      try {
+        const io = req.app.get('io');
+        if (io) {
+          const occupancyPayload = {
+            vehicle_id: finalVehicleId,
+            current_occupancy: occupancy?.current_occupancy || 0,
+            occupancy_status: occupancy?.occupancy_status || 'available',
+            capacity: occupancy?.capacity || 14,
+          };
+          io.to('admin').emit('vehicle.occupancyUpdated', occupancyPayload);
+          io.to(`user_${userId}`).emit('vehicle.occupancyUpdated', occupancyPayload);
+        }
+      } catch (ioErr) {
+        console.error('Socket emission failed:', ioErr.message);
       }
 
       res.json({

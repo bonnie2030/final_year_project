@@ -1,3 +1,7 @@
+/**
+ * The `Payment` component in TypeScript React renders a secure payment page for completing matatu
+ * booking payments with features like 256-bit encryption and instant processing.
+ */
 import { Helmet } from "react-helmet-async";
 import Header from "@/components/Header";
 import PaymentSimulation from "@/components/PaymentSimulation";
@@ -12,7 +16,13 @@ export default function Payment() {
   const location = useLocation();
   const params = new URLSearchParams(location.search);
   const routeId = params.get('routeId') ?? undefined;
-  const vehicle = params.get('vehicle') ?? undefined;
+  const vehicle =
+    params.get('vehicle') ??
+    params.get('vehicleNumber') ??
+    params.get('vehicle_number') ??
+    params.get('registration_number') ??
+    params.get('plateNumber') ??
+    undefined;
   const routeName = params.get('routeName') ?? undefined;
   const routeFrom = params.get('from') ?? undefined;
   const routeTo = params.get('to') ?? undefined;
