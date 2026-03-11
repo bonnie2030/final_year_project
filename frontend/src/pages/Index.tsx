@@ -1,3 +1,5 @@
+/* The above code is a TypeScript React component for a web application called "MatatuConnect" which is
+a matatu booking platform in Kenya. Here is a summary of what the code is doing: */
 import React, { useMemo, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import Header from "@/components/Header";

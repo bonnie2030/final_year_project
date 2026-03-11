@@ -688,7 +688,8 @@ class AdminController {
         RETURNING *;
       `;
 
-      await pool.query(occupancyQuery, [activeVehicle.id, activeVehicle.capacity]);
+      const occupancyResult = await pool.query(occupancyQuery, [activeVehicle.id, activeVehicle.capacity]);
+      const updatedOccupancy = occupancyResult.rows[0] || null;
 
       // Get route details for WhatsApp
       const route = await RouteModel.getRouteById(routeId);
@@ -705,6 +706,40 @@ class AdminController {
         // Don't fail the whole request if WhatsApp fails
       }
 
+      // Emit payment and occupancy updates so admin and driver dashboards stay in sync.
+      try {
+        const io = req.app.get('io');
+        if (io) {
+          const paymentPayload = {
+            payment_id: payment.id,
+            status: payment.status,
+            vehicle_id: activeVehicle.id,
+            vehicle_number: activeVehicle.registration_number || null,
+            transaction_id: payment.transaction_id || null,
+            updated_at: payment.updated_at || new Date().toISOString(),
+            route_name: route?.route_name || null,
+            amount: payment.amount,
+          };
+
+          const occupancyPayload = {
+            vehicle_id: activeVehicle.id,
+            current_occupancy: Number(updatedOccupancy?.current_occupancy || (activeVehicle.current_occupancy || 0) + 1),
+            occupancy_status: updatedOccupancy?.occupancy_status || 'available',
+            capacity: Number(activeVehicle.capacity || 14),
+          };
+
+          io.to('admin').emit('payment.statusUpdated', paymentPayload);
+          io.to('admin').emit('vehicle.occupancyUpdated', occupancyPayload);
+
+          if (activeVehicle.user_id) {
+            io.to(`user_${activeVehicle.user_id}`).emit('payment.statusUpdated', paymentPayload);
+            io.to(`user_${activeVehicle.user_id}`).emit('vehicle.occupancyUpdated', occupancyPayload);
+          }
+        }
+      } catch (socketErr) {
+        console.error('Manual payment socket emission failed:', socketErr.message);
+      }
+
       res.json({
         message: 'Payment recorded successfully',
         payment,
@@ -714,7 +749,7 @@ class AdminController {
         vehicle: {
           id: activeVehicle.id,
           registration_number: activeVehicle.registration_number,
-          current_occupancy: (activeVehicle.current_occupancy || 0) + 1,
+          current_occupancy: Number(updatedOccupancy?.current_occupancy || (activeVehicle.current_occupancy || 0) + 1),
           capacity: activeVehicle.capacity
         }
       });

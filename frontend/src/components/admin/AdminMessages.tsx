@@ -8,7 +8,6 @@ const API_BASE = import.meta.env.VITE_API_URL || '';
 export default function AdminMessages() {
   const { toast } = useToast();
   const [drivers, setDrivers] = useState<any[]>([]);
-  const [driverQuery, setDriverQuery] = useState('');
   const [selectedUser, setSelectedUser] = useState<number | null>(null);
   const [selectedDriver, setSelectedDriver] = useState<any | null>(null);
   const [conversation, setConversation] = useState<any[]>([]);
@@ -176,135 +175,128 @@ export default function AdminMessages() {
     return rows;
   })();
 
-  const filteredDrivers = drivers.filter((d) => {
-    const name = (d.name || d.username || '').toLowerCase();
-    const contact = (d.phone || d.email || '').toLowerCase();
-    const query = driverQuery.trim().toLowerCase();
-    if (!query) return true;
-    return name.includes(query) || contact.includes(query);
+  const sortedDrivers = [...drivers].sort((a, b) => {
+    const aName = String(a.name || a.username || '').toLowerCase();
+    const bName = String(b.name || b.username || '').toLowerCase();
+    return aName.localeCompare(bName);
   });
 
+  const handleDriverSelect = async (value: string) => {
+    if (!value) {
+      setSelectedUser(null);
+      setSelectedDriver(null);
+      setConversation([]);
+      return;
+    }
+
+    const pickedId = Number(value);
+    const driver = sortedDrivers.find((d) => Number(d.user_id || d.id) === pickedId);
+    if (driver) {
+      await openConversation(driver);
+    }
+  };
+
   return (
-    <div className="p-4">
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-        <div className="col-span-1 rounded-xl border bg-white/80 backdrop-blur p-3 shadow-sm">
-          <div className="flex items-center justify-between mb-2">
-            <div>
-              <h4 className="font-semibold">Registered Drivers</h4>
-              <div className="text-xs text-muted-foreground">Select a driver to open chat</div>
-            </div>
-            <div className="text-xs rounded-full bg-emerald-50 text-emerald-700 px-2 py-0.5">
-              {filteredDrivers.length}
-            </div>
+    <div className="rounded-xl border border-slate-200 bg-white/90 backdrop-blur p-4 shadow-sm">
+      <div className="space-y-3">
+        <div className="flex items-center justify-between gap-3">
+          <div>
+            <h4 className="text-sm font-semibold text-slate-900">Driver Chat</h4>
+            <p className="text-xs text-slate-500">Pick a driver from the dropdown to open conversation.</p>
           </div>
-          <input
-            className="mb-3 w-full rounded-md border px-3 py-2 text-sm"
-            value={driverQuery}
-            onChange={(e) => setDriverQuery(e.target.value)}
-            placeholder="Search drivers..."
-          />
-          <div className="space-y-2 max-h-[420px] overflow-auto pr-1">
-            {filteredDrivers.map(d => {
-              const driverId = d.user_id || d.id;
+          <div className="text-xs rounded-full bg-emerald-50 text-emerald-700 px-2 py-1">
+            {sortedDrivers.length} drivers
+          </div>
+        </div>
+
+        <div className="grid grid-cols-1 sm:grid-cols-[1fr_auto] gap-2">
+          <select
+            className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500"
+            value={selectedUser ? String(selectedUser) : ''}
+            onChange={(e) => handleDriverSelect(e.target.value)}
+          >
+            <option value="">Select driver...</option>
+            {sortedDrivers.map((d) => {
+              const driverId = Number(d.user_id || d.id);
               const displayName = d.name || d.username || `Driver ${driverId}`;
-              const initial = String(displayName).charAt(0).toUpperCase();
-              const isOnline = typeof presenceMap[Number(driverId)] === 'boolean'
-                ? presenceMap[Number(driverId)]
+              const isOnline = typeof presenceMap[driverId] === 'boolean'
+                ? presenceMap[driverId]
                 : (d.is_online === true || String(d.status || '').toLowerCase() === 'online');
               return (
-                <div
-                  key={driverId}
-                  className={`flex items-center gap-3 p-2 rounded-lg border cursor-pointer transition hover:bg-slate-50 ${selectedUser === Number(driverId) ? 'bg-emerald-50 border-emerald-100' : ''}`}
-                  onClick={() => openConversation(d)}
-                >
-                  <div className="h-9 w-9 rounded-full bg-emerald-100 text-emerald-700 flex items-center justify-center text-xs font-semibold">
-                    {initial}
-                  </div>
-                  <div className="min-w-0 flex-1">
-                    <div className="font-medium truncate">{displayName}</div>
-                    <div className="text-xs text-muted-foreground truncate">{d.phone || d.email || 'No contact info'}</div>
-                  </div>
-                  <div className={`text-[11px] px-2 py-0.5 rounded-full ${isOnline ? 'bg-emerald-100 text-emerald-700' : 'bg-slate-100 text-slate-600'}`}>
-                    {isOnline ? 'Online' : 'Offline'}
-                  </div>
-                </div>
+                <option key={driverId} value={driverId}>
+                  {displayName} {isOnline ? '(Online)' : '(Offline)'}
+                </option>
               );
             })}
-          </div>
+          </select>
+          <Button type="button" variant="outline" onClick={fetchDrivers}>Refresh</Button>
         </div>
 
-        <div className="col-span-2 rounded-xl border bg-white/80 backdrop-blur p-3 shadow-sm">
-          {selectedUser ? (
-            <>
-              <div className="flex items-center justify-between mb-2">
-                <div className="flex items-center gap-3">
-                  <div className="h-10 w-10 rounded-full bg-emerald-100 text-emerald-700 flex items-center justify-center text-xs font-semibold">
-                    {String(selectedDriver?.name || selectedDriver?.username || selectedUser).charAt(0)}
-                  </div>
-                  <div>
-                    <div className="text-sm font-semibold">{selectedDriver?.name || selectedDriver?.username || `Driver #${selectedUser}`}</div>
-                    <div className="text-[11px] text-muted-foreground">Support conversation</div>
-                  </div>
-                </div>
-                <div className="text-xs text-muted-foreground">{isOtherTyping ? 'Typing...' : 'Online now'}</div>
+        {selectedUser ? (
+          <>
+            <div className="flex items-center justify-between rounded-lg border border-emerald-100 bg-emerald-50 px-3 py-2">
+              <div className="text-sm font-medium text-emerald-900">
+                {selectedDriver?.name || selectedDriver?.username || `Driver #${selectedUser}`}
               </div>
+              <div className="text-xs text-emerald-700">{isOtherTyping ? 'Typing...' : 'Conversation open'}</div>
+            </div>
 
-              <div className="h-72 overflow-auto mb-3 rounded-lg border bg-[radial-gradient(circle_at_1px_1px,rgba(16,185,129,0.12)_1px,transparent_0)] bg-[length:16px_16px] p-4 flex flex-col gap-2">
-                {conversationRows.map((row, idx) => {
-                  if (row.type === 'day') {
-                    return (
-                      <div key={`day-${row.day}-${idx}`} className="self-center text-[11px] text-muted-foreground bg-white/80 border rounded-full px-3 py-1">
-                        {row.day}
-                      </div>
-                    );
-                  }
-                  const m = row.msg;
+            <div className="h-[420px] overflow-auto rounded-lg border border-slate-200 bg-[radial-gradient(circle_at_1px_1px,rgba(15,118,110,0.09)_1px,transparent_0)] bg-[length:14px_14px] p-3 flex flex-col gap-2">
+              {conversationRows.map((row, idx) => {
+                if (row.type === 'day') {
                   return (
-                    <div
-                      key={m.id}
-                      className={`max-w-[85%] rounded-2xl px-3 py-2 text-sm shadow-sm ${m.sender_id === adminId ? 'self-end bg-emerald-200' : 'self-start bg-white border border-emerald-100'}`}
-                    >
-                      <div>{m.message}</div>
-                      <div className="mt-1 flex items-center gap-2 text-[10px] text-muted-foreground">
-                        <span>{new Date(m.created_at).toLocaleString()}</span>
-                        {m.sender_id === adminId && (
-                          <span>{m.is_read ? 'Read' : 'Sent'}</span>
-                        )}
-                      </div>
+                    <div key={`day-${row.day}-${idx}`} className="self-center text-[11px] text-slate-500 bg-white border border-slate-200 rounded-full px-3 py-1">
+                      {row.day}
                     </div>
                   );
-                })}
-                {isOtherTyping && (
-                  <div className="self-start rounded-2xl bg-white px-3 py-2 text-sm text-muted-foreground animate-pulse border border-emerald-100">
-                    Typing...
-                  </div>
-                )}
-                <div ref={bottomRef} />
-              </div>
+                }
 
-              <div className="flex gap-2 items-center">
-                <input
-                  className="flex-1 border rounded-full px-4 py-2"
-                  value={messageText}
-                  onChange={e => handleInputChange(e.target.value)}
-                  onBlur={handleInputBlur}
-                  onKeyDown={(e) => {
-                    if (e.key === 'Enter') {
-                      e.preventDefault();
-                      sendMessage();
-                    }
-                  }}
-                  placeholder="Write a reply..."
-                />
-                <Button onClick={sendMessage} className="rounded-full px-5">Send</Button>
-              </div>
-            </>
-          ) : (
-            <div className="h-full flex items-center justify-center text-sm text-muted-foreground">
-              Select a driver to start chatting.
+                const m = row.msg;
+                const isMine = m.sender_id === adminId;
+                return (
+                  <div
+                    key={m.id}
+                    className={`max-w-[88%] rounded-2xl px-3 py-2 text-sm shadow-sm ${isMine ? 'self-end bg-emerald-200 text-slate-900' : 'self-start bg-white border border-emerald-100 text-slate-800'}`}
+                  >
+                    <div className="whitespace-pre-wrap break-words">{m.message}</div>
+                    <div className="mt-1 flex items-center gap-2 text-[10px] text-slate-500">
+                      <span>{new Date(m.created_at).toLocaleString()}</span>
+                      {isMine && <span>{m.is_read ? 'Read' : 'Sent'}</span>}
+                    </div>
+                  </div>
+                );
+              })}
+
+              {isOtherTyping && (
+                <div className="self-start rounded-2xl bg-white px-3 py-2 text-sm text-slate-500 animate-pulse border border-emerald-100">
+                  Typing...
+                </div>
+              )}
+              <div ref={bottomRef} />
             </div>
-          )}
-        </div>
+
+            <div className="flex gap-2 items-center">
+              <input
+                className="flex-1 border border-slate-300 rounded-full px-4 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                value={messageText}
+                onChange={e => handleInputChange(e.target.value)}
+                onBlur={handleInputBlur}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') {
+                    e.preventDefault();
+                    sendMessage();
+                  }
+                }}
+                placeholder="Write a reply..."
+              />
+              <Button onClick={sendMessage} className="rounded-full px-5 bg-emerald-600 hover:bg-emerald-700">Send</Button>
+            </div>
+          </>
+        ) : (
+          <div className="h-[420px] rounded-lg border border-dashed border-slate-300 bg-slate-50 flex items-center justify-center text-sm text-slate-500">
+            Select a driver from the dropdown to start chatting.
+          </div>
+        )}
       </div>
     </div>
   );

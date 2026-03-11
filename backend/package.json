@@ -5,6 +5,7 @@
   "main": "server.js",
   "scripts": {
     "start": "node server.js",
+    "restart:clean": "powershell -ExecutionPolicy Bypass -File ./scripts/restart-backend.ps1",
     "dev": "nodemon server.js",
     "test": "jest",
     "test:watch": "jest --watch",

@@ -207,6 +207,21 @@ class UserModel {
     }
   }
 
+  static async updateProfileImage(id, profileImage) {
+    const query = `
+      UPDATE users
+      SET profile_image = $1, updated_at = CURRENT_TIMESTAMP
+      WHERE id = $2
+      RETURNING id, username, name, email, phone, role, status, profile_image;
+    `;
+    try {
+      const result = await pool.query(query, [profileImage, id]);
+      return result.rows[0];
+    } catch (error) {
+      throw error;
+    }
+  }
+
   // Change password
   static async changePassword(id, newPassword) {
     const hashedPassword = await bcrypt.hash(newPassword, 10);
