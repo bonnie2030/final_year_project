@@ -22,6 +22,9 @@ export default function DriverManager() {
   const [loading, setLoading] = useState(false);
   const [loadingOccupancyVehicles, setLoadingOccupancyVehicles] = useState(false);
   const [form, setForm] = useState({ name: '', email: '', phone: '', password: '', driving_license: '', assigned_vehicle_id: '' });
+  const [showAllDrivers, setShowAllDrivers] = useState(false);
+  const [selectedDriverId, setSelectedDriverId] = useState<string>('');
+  const [uploadingPhotoUserId, setUploadingPhotoUserId] = useState<number | null>(null);
 
   const [lastCreated, setLastCreated] = useState<{ username: string; password: string } | null>(null);
   const [showTempPasswordModal, setShowTempPasswordModal] = useState(false);
@@ -31,6 +34,49 @@ export default function DriverManager() {
   const getAuthHeaders = () => {
     const token = localStorage.getItem('token');
     return token ? { Authorization: `Bearer ${token}` } : {};
+  };
+
+  const getDriverUserId = (driver: any) => Number(driver.user_id || driver.userId || driver.id || 0);
+
+  const resolveImageUrl = (value?: string | null) => {
+    if (!value) return '';
+    if (/^https?:\/\//i.test(value)) {
+      if (typeof window !== 'undefined' && window.location.protocol === 'https:' && value.startsWith('http://')) {
+        return '';
+      }
+      return value;
+    }
+    const normalized = value.startsWith('/') ? value : `/${value}`;
+    // In dev, serve uploads via Vite proxy to avoid mixed-content issues on https://localhost:8080.
+    if (normalized.startsWith('/uploads/')) return normalized;
+    return `${API_BASE}${normalized}`;
+  };
+
+  const uploadDriverPhoto = async (userId: number, file: File | null) => {
+    if (!file) return;
+    try {
+      setUploadingPhotoUserId(userId);
+      const formData = new FormData();
+      formData.append('photo', file);
+
+      const res = await fetch(API_BASE + `/api/drivers/${userId}/photo`, {
+        method: 'POST',
+        headers: { ...getAuthHeaders() },
+        body: formData,
+      });
+      const data = await res.json();
+
+      if (res.ok) {
+        toast({ title: 'Driver photo updated' });
+        fetchDrivers();
+      } else {
+        toast({ title: 'Photo upload failed', description: data.message || 'Error', variant: 'destructive' });
+      }
+    } catch (err: any) {
+      toast({ title: 'Photo upload failed', description: err.message || 'Error', variant: 'destructive' });
+    } finally {
+      setUploadingPhotoUserId(null);
+    }
   };
 
   const fetchDrivers = async () => {
@@ -153,6 +199,18 @@ export default function DriverManager() {
     return () => clearInterval(intervalId);
   }, []);
 
+  useEffect(() => {
+    if (drivers.length === 0) {
+      setSelectedDriverId('');
+      return;
+    }
+
+    const exists = drivers.some((d) => String(getDriverUserId(d)) === selectedDriverId);
+    if (!selectedDriverId || !exists) {
+      setSelectedDriverId(String(getDriverUserId(drivers[0])));
+    }
+  }, [drivers, selectedDriverId]);
+
   const handleCreate = async () => {
     if (!form.name || !form.email || !form.password) {
       toast({ title: 'Missing fields', description: 'Name, email and password are required', variant: 'destructive' });
@@ -195,6 +253,19 @@ export default function DriverManager() {
       const message = err instanceof Error ? err.message : String(err || 'Error');
       toast({ title: 'Create failed', description: message || 'Error', variant: 'destructive' });
     } finally { setLoading(false); }
+  };
+
+  const selectedDriverIndex = drivers.findIndex((d) => String(getDriverUserId(d)) === selectedDriverId);
+  const visibleDrivers = showAllDrivers
+    ? drivers
+    : drivers.filter((d) => String(getDriverUserId(d)) === selectedDriverId);
+
+  const goToDriverOffset = (offset: number) => {
+    if (drivers.length === 0) return;
+    const currentIndex = selectedDriverIndex >= 0 ? selectedDriverIndex : 0;
+    const nextIndex = (currentIndex + offset + drivers.length) % drivers.length;
+    setSelectedDriverId(String(getDriverUserId(drivers[nextIndex])));
+    setShowAllDrivers(false);
   };
 
   return (
@@ -257,15 +328,89 @@ export default function DriverManager() {
           </div>
         </div>
 
+        <div className="mt-3 rounded-lg border bg-muted/30 p-3">
+          <div className="flex flex-col lg:flex-row lg:items-center gap-2 lg:gap-3">
+            <label className="text-sm font-medium text-muted-foreground whitespace-nowrap">Driver view</label>
+            <select
+              className="w-full lg:max-w-md rounded-md border border-input bg-background px-3 py-2 text-sm"
+              value={selectedDriverId}
+              onChange={(e) => {
+                setSelectedDriverId(e.target.value);
+                setShowAllDrivers(false);
+              }}
+              disabled={drivers.length === 0}
+            >
+              {drivers.length === 0 && <option value="">No drivers available</option>}
+              {drivers.map((d) => {
+                const id = getDriverUserId(d);
+                return (
+                  <option key={id} value={String(id)}>
+                    {d.username} - {d.name || 'Unnamed'}
+                  </option>
+                );
+              })}
+            </select>
+
+            <div className="flex items-center gap-2">
+              <Button size="sm" variant="outline" onClick={() => goToDriverOffset(-1)} disabled={drivers.length <= 1}>Prev</Button>
+              <Button size="sm" variant="outline" onClick={() => goToDriverOffset(1)} disabled={drivers.length <= 1}>Next</Button>
+              <Button
+                size="sm"
+                variant={showAllDrivers ? 'default' : 'outline'}
+                onClick={() => setShowAllDrivers((prev) => !prev)}
+              >
+                {showAllDrivers ? 'Show selected only' : 'Show all'}
+              </Button>
+            </div>
+          </div>
+          {!showAllDrivers && (
+            <p className="text-xs text-muted-foreground mt-2">
+              Showing one driver at a time to reduce scrolling. Use Prev/Next or dropdown to switch.
+            </p>
+          )}
+        </div>
+
         <div className="grid gap-2 mt-2">
-          {drivers.map((d) => (
+          {visibleDrivers.map((d) => (
             <div key={d.id} className="p-3 bg-card rounded-lg border"> 
               <div className="flex items-center justify-between">
-                <div>
+                <div className="flex items-center gap-3">
+                  <div className="h-14 w-14 rounded-full overflow-hidden border bg-muted flex items-center justify-center text-xs font-semibold text-muted-foreground">
+                    {d.profile_image ? (
+                      <img
+                        src={resolveImageUrl(d.profile_image)}
+                        alt={`${d.name || d.username} profile`}
+                        className="h-full w-full object-cover"
+                      />
+                    ) : (
+                      <span>{String((d.name || d.username || 'D')).charAt(0).toUpperCase()}</span>
+                    )}
+                  </div>
+
+                  <div>
                   <div className="font-medium">{d.username} — {d.name}</div>
                   <div className="text-sm text-muted-foreground">{d.email} {d.phone ? `• ${d.phone}` : ''}</div>
+                  </div>
                 </div>
                 <div className="text-sm text-muted-foreground">Vehicle: {d.vehicle_reg || 'none'}</div>
+              </div>
+
+              <div className="mt-3 flex items-center gap-2">
+                <label className="inline-flex items-center gap-2 cursor-pointer text-sm rounded-md border px-3 py-1.5 hover:bg-muted">
+                  <span>{uploadingPhotoUserId === Number(d.user_id || d.userId) ? 'Uploading...' : 'Upload photo'}</span>
+                  <input
+                    type="file"
+                    accept="image/png,image/jpeg,image/jpg,image/webp"
+                    className="hidden"
+                    disabled={uploadingPhotoUserId === Number(d.user_id || d.userId)}
+                    onChange={(e) => {
+                      const file = e.target.files?.[0] || null;
+                      uploadDriverPhoto(Number(d.user_id || d.userId), file);
+                      e.currentTarget.value = '';
+                    }}
+                  />
+                </label>
+                <span className="text-xs text-muted-foreground">JPG, PNG, WEBP up to 5MB</span>
               </div>
 
               <div className="flex gap-2 mt-3">

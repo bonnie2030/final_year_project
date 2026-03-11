@@ -49,7 +49,7 @@ class DriverModel {
   static async getDriverByUserId(userId) {
     const query = `
       SELECT d.*, 
-             u.username, u.name, u.phone, u.email, 
+              u.username, u.name, u.phone, u.email, u.profile_image,
              v.registration_number as vehicle_reg,
              v.route_id,
              r.route_name,
@@ -70,7 +70,7 @@ class DriverModel {
   }
 
   static async getAllDrivers() {
-    const query = 'SELECT d.*, u.username, u.name, u.phone, u.email, v.registration_number as vehicle_reg FROM drivers d LEFT JOIN users u on d.user_id = u.id LEFT JOIN vehicles v ON d.assigned_vehicle_id = v.id ORDER BY d.created_at DESC';
+    const query = 'SELECT d.*, u.username, u.name, u.phone, u.email, u.profile_image, v.registration_number as vehicle_reg FROM drivers d LEFT JOIN users u on d.user_id = u.id LEFT JOIN vehicles v ON d.assigned_vehicle_id = v.id ORDER BY d.created_at DESC';
     try {
       const result = await pool.query(query);
       return result.rows;
@@ -135,7 +135,7 @@ class DriverModel {
 
   // Get driver assigned to a specific vehicle
   static async getDriverByVehicleId(vehicleId) {
-    const query = 'SELECT d.*, u.username, u.name, u.phone, u.email, v.registration_number as vehicle_reg FROM drivers d LEFT JOIN users u on d.user_id = u.id LEFT JOIN vehicles v ON d.assigned_vehicle_id = v.id WHERE d.assigned_vehicle_id = $1';
+    const query = 'SELECT d.*, u.username, u.name, u.phone, u.email, u.profile_image, v.registration_number as vehicle_reg FROM drivers d LEFT JOIN users u on d.user_id = u.id LEFT JOIN vehicles v ON d.assigned_vehicle_id = v.id WHERE d.assigned_vehicle_id = $1';
     try {
       const result = await pool.query(query, [vehicleId]);
       return result.rows[0];

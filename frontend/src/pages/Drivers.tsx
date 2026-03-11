@@ -2,7 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { Helmet } from 'react-helmet-async';
 import Header from '@/components/Header';
 import { useToast } from '@/hooks/use-toast';
-import { Avatar, AvatarFallback } from '@/components/ui/avatar';
+import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
 import { Skeleton } from '@/components/ui/skeleton';
@@ -42,6 +42,19 @@ export default function Drivers() {
 
   const handleCopy = (text?: string) => {
     if (!text) return; try { navigator.clipboard.writeText(text); toast({ title: 'Copied' }); } catch (e) { toast({ title: 'Copy failed' }); }
+  };
+
+  const resolveImageUrl = (value?: string | null) => {
+    if (!value) return '';
+    if (/^https?:\/\//i.test(value)) {
+      if (typeof window !== 'undefined' && window.location.protocol === 'https:' && value.startsWith('http://')) {
+        return '';
+      }
+      return value;
+    }
+    const normalized = value.startsWith('/') ? value : `/${value}`;
+    if (normalized.startsWith('/uploads/')) return normalized;
+    return `${API_BASE}${normalized}`;
   };
 
   return (
@@ -87,6 +100,7 @@ export default function Drivers() {
                 <div key={driver.id} className="p-4 bg-white rounded-lg shadow-sm border">
                   <div className="flex items-start gap-4">
                     <Avatar>
+                      <AvatarImage src={resolveImageUrl(driver.profile_image)} alt={driver.name || driver.username || 'Driver'} />
                       <AvatarFallback>{initials}</AvatarFallback>
                     </Avatar>
 

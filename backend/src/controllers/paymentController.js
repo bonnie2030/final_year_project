@@ -45,6 +45,7 @@ const STK_TERMINAL_FAILURE_CODES = new Set(['1', '17', '26', '1032', '1037', '20
 const STK_FAILURE_GRACE_MS = 15000;
 const STK_TIMEOUT_FAILURE_GRACE_MS = 60000;
 const STK_TIMEOUT_FAILURE_THRESHOLD = 2;
+const ASSUMED_SUCCESS_DELAY_MS = 10000;
 const stkQueryLastRunByCheckout = new Map();
 const stkTimeoutCountByCheckout = new Map();
 
@@ -58,6 +59,8 @@ const emitPaymentStatusUpdate = (io, payment, extras = {}) => {
   const payload = {
     payment_id: payment.id,
     status: payment.status,
+    vehicle_id: payment.vehicle_id || null,
+    vehicle_number: payment.vehicle_number || null,
     transaction_id: payment.transaction_id || null,
     failure_reason: payment.failure_reason || null,
     updated_at: payment.updated_at || new Date().toISOString(),
@@ -69,6 +72,31 @@ const emitPaymentStatusUpdate = (io, payment, extras = {}) => {
 };
 
 class PaymentController {
+  static async finalizeAssumedSuccessPayment(paymentId, io = null) {
+    const assumedTransactionId = `ASSUMED-${paymentId}-${Date.now()}`;
+    const completedPayment = await PaymentModel.updatePaymentStatus(
+      paymentId,
+      'completed',
+      assumedTransactionId
+    );
+
+    if (!completedPayment) return null;
+
+    const paymentWithDetails = await PaymentModel.getPaymentByIdWithDetails(completedPayment.id);
+    const normalizedCompleted = paymentWithDetails || completedPayment;
+    const ticketReference = getSafeTicketReference(normalizedCompleted);
+
+    emitPaymentStatusUpdate(io, normalizedCompleted, {
+      ticket_reference: ticketReference,
+      route_name: normalizedCompleted.route_name || null,
+      amount: normalizedCompleted.amount,
+    });
+
+    PaymentController.queuePaymentWhatsAppNotifications(normalizedCompleted, ticketReference);
+    await PaymentController.autoIncrementOccupancy(normalizedCompleted, io);
+    return normalizedCompleted;
+  }
+
   static async sendPaymentWhatsAppNotifications(paymentRecord, ticketReference) {
     if (!paymentRecord) return;
 
@@ -417,11 +445,31 @@ class PaymentController {
       });
 
       if (response.ResponseCode === '0') {
-        await PaymentModel.updateMpesaRequestIds(
+        const paymentWithRequestIds = await PaymentModel.updateMpesaRequestIds(
           paymentRecord.id,
           response.MerchantRequestID,
           response.CheckoutRequestID
         );
+
+        // Emit immediately so admin/driver dashboards reflect new payment rows without waiting.
+        const io = req.app.get('io') || null;
+        emitPaymentStatusUpdate(io, paymentWithRequestIds || paymentRecord, {
+          route_name: null,
+          amount: paymentWithRequestIds?.amount || paymentRecord.amount,
+        });
+
+        const assumeSuccess = isTruthyRefresh(process.env.PAYMENT_ASSUME_SUCCESS || 'false');
+        if (assumeSuccess) {
+          setTimeout(async () => {
+            try {
+              const latest = await PaymentModel.getPaymentById(paymentRecord.id);
+              if (!latest || latest.status === 'completed') return;
+              await PaymentController.finalizeAssumedSuccessPayment(paymentRecord.id, io);
+            } catch (assumeErr) {
+              console.error('Assumed-success finalize failed:', assumeErr.message);
+            }
+          }, ASSUMED_SUCCESS_DELAY_MS);
+        }
 
         paymentDebugLog('initiate.success', {
           paymentId: paymentRecord.id,
@@ -430,14 +478,20 @@ class PaymentController {
           checkoutRequestId: response.CheckoutRequestID,
           merchantRequestId: response.MerchantRequestID,
           phoneNumber: normalizedPhone,
+          assumedSuccess: assumeSuccess,
+          assumedDelayMs: assumeSuccess ? ASSUMED_SUCCESS_DELAY_MS : 0,
         });
 
         return res.status(200).json({
           success: true,
-          message: 'Check your phone for M-Pesa prompt!',
+          message: assumeSuccess
+            ? 'Check your phone for M-Pesa prompt. Payment will auto-complete in 10 seconds (project mode).'
+            : 'Check your phone for M-Pesa prompt!',
           payment_id: paymentRecord.id,
           checkout_request_id: response.CheckoutRequestID,
           merchant_request_id: response.MerchantRequestID,
+          assumed_completed: assumeSuccess,
+          assumed_completion_delay_ms: assumeSuccess ? ASSUMED_SUCCESS_DELAY_MS : 0,
         });
       }
 
@@ -506,6 +560,15 @@ class PaymentController {
       }
 
       if (String(resultCode) === '0') {
+        const existingPayment = await PaymentModel.getPaymentByCheckoutRequestId(checkoutRequestId);
+        if (existingPayment?.status === 'completed') {
+          paymentDebugLog('callback.already.completed', {
+            paymentId: existingPayment.id,
+            checkoutRequestId,
+          });
+          return res.status(200).send('Success');
+        }
+
         const transactionId = metadata.MpesaReceiptNumber || checkoutRequestId;
 
         const updatedPayment = await PaymentModel.updateStatusByCheckoutRequestId(
@@ -541,6 +604,17 @@ class PaymentController {
         // Auto-increment vehicle occupancy from this completed payment
         await PaymentController.autoIncrementOccupancy(updatedPayment, io);
       } else {
+        const existingPayment = await PaymentModel.getPaymentByCheckoutRequestId(checkoutRequestId);
+        if (existingPayment?.status === 'completed') {
+          paymentDebugLog('callback.failure.ignored_completed', {
+            paymentId: existingPayment.id,
+            checkoutRequestId,
+            resultCode: String(resultCode),
+            resultDesc,
+          });
+          return res.status(200).send('Success');
+        }
+
         const failedPayment = await PaymentModel.updateStatusByCheckoutRequestId(
           checkoutRequestId,
           'failed',
