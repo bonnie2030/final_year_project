@@ -4,6 +4,7 @@ import { Toaster as Sonner } from "@/components/ui/sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
+import { useLocation } from "react-router-dom";
 import { HelmetProvider } from "react-helmet-async";
 import ErrorBoundary from "@/components/ErrorBoundary";
 import { useSessionValidation } from "@/hooks/useSessionValidation";
@@ -81,6 +82,13 @@ const AppWithSessionValidation = () => {
   );
 };
 
+const AppFooter = () => {
+  const location = useLocation();
+  const hideFooter = location.pathname === "/driver/dashboard";
+  if (hideFooter) return null;
+  return <Footer />;
+};
+
 const App = () => (
   <ErrorBoundary>
     <HelmetProvider>
@@ -91,8 +99,7 @@ const App = () => (
           <BrowserRouter>
             <ScrollToTop />
             <AppWithSessionValidation />
-            {/* Footer present on every page */}
-            <Footer />
+            <AppFooter />
           </BrowserRouter>
         </TooltipProvider>
       </QueryClientProvider>

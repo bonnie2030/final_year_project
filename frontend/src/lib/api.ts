@@ -140,6 +140,9 @@ export const api = {
       const query = qs.toString() ? `?${qs.toString()}` : '';
       return apiFetch<any>(`/api/payments/${id}${query}`);
     },
+    sendTicketWhatsApp: (paymentId: number) => apiFetch<any>(`/api/payments/${paymentId}/send-ticket-whatsapp`, {
+      method: 'POST',
+    }),
   },
 
   // Feedback

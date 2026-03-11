@@ -47,6 +47,7 @@ const PaymentSimulation = ({
   const [selectedVehicle, setSelectedVehicle] = useState<string>(initialVehicleNumber ?? '');
   const [isProcessing, setIsProcessing] = useState(false);
   const [showTicket, setShowTicket] = useState(false);
+  const [paymentId, setPaymentId] = useState<number | null>(null);
   const [transactionRef, setTransactionRef] = useState<string | null>(null);
   const [paidAt, setPaidAt] = useState<string | null>(null);
   const [whatsappStatus, setWhatsappStatus] = useState<{ sent: boolean; error: string | null } | null>(null);
@@ -210,6 +211,14 @@ const PaymentSimulation = ({
   };
 
   const applyCompletedPayment = (payment: any, statusRes: any = {}) => {
+    const resolvedPaymentId = Number(payment?.id || payment?.payment_id || statusRes?.payment?.id || 0);
+    console.log('[PaymentSimulation] applyCompletedPayment called', { payment, statusRes, resolvedPaymentId });
+    if (resolvedPaymentId > 0) {
+      console.log('[PaymentSimulation] Setting paymentId to:', resolvedPaymentId);
+      setPaymentId(resolvedPaymentId);
+    } else {
+      console.warn('[PaymentSimulation] Could not extract valid paymentId from payment:', { payment, statusRes });
+    }
     const ref = statusRes.ticket?.reference || payment.transaction_id || `TKT-${payment.id}`;
     setTransactionRef(ref);
     setPaidAt(String(statusRes.ticket?.paidAt || payment.updated_at || new Date().toISOString()));
@@ -394,6 +403,7 @@ const PaymentSimulation = ({
     }
 
     setIsProcessing(true);
+    setPaymentId(null);
     setPaymentStatus('processing');
     paymentResolvedRef.current = false;
     stopPolling();
@@ -438,10 +448,13 @@ const PaymentSimulation = ({
 
       const res = await api.payments.create(payload);
       const createdPayment = res.payment;
+      if (createdPayment?.id) {
+        setPaymentId(Number(createdPayment.id));
+      }
 
       showPaymentToast({
         title: 'Payment Initiated',
-        description: 'M-Pesa STK prompt (simulated). You will receive a WhatsApp confirmation when payment completes.',
+        description: 'M-Pesa STK prompt (simulated). After confirmation, you can choose whether to send the ticket to WhatsApp.',
       });
 
       // If backend reports notifications status, show it
@@ -480,6 +493,7 @@ const PaymentSimulation = ({
       <DigitalTicket
         route={selRoute}
         vehicleNumber={vehicleNumber}
+        paymentId={paymentId || undefined}
         transactionId={transactionRef || undefined}
         paidAt={paidAt || undefined}
         onClose={() => {

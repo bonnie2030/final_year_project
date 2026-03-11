@@ -2,7 +2,9 @@ import React, { useEffect, useRef, useState } from 'react';
 import io from 'socket.io-client';
 import { Button } from '@/components/ui/button';
 import { useToast } from '@/hooks/use-toast';
-import { AlertCircle, CheckCircle, Circle, CreditCard, Mail, MapPin, Minus, Navigation, Phone, Plus, Truck } from 'lucide-react';
+import Header from '@/components/Header';
+import { AlertCircle, CheckCircle, Circle, CreditCard, LogOut, Mail, MapPin, Minus, Navigation, Phone, Plus, Truck } from 'lucide-react';
+import { useNavigate } from 'react-router-dom';
 
 const API_BASE = import.meta.env.VITE_API_URL || '';
 const socket = API_BASE ? io(API_BASE) : io(); // fall back to same host
@@ -11,6 +13,7 @@ export default function DriverDashboard() {
   const [driver, setDriver] = useState<any>(null);
   const [status, setStatus] = useState('offline');
   const { toast } = useToast();
+  const navigate = useNavigate();
   const [locationEnabled, setLocationEnabled] = useState(false);
   const [currentLocation, setCurrentLocation] = useState<{ latitude: number; longitude: number } | null>(null);
   const locationWatchId = useRef<number | null>(null);
@@ -547,32 +550,60 @@ export default function DriverDashboard() {
   const effectiveOccupancy = Number(trip?.current_occupancy ?? driverOccupancy?.current_occupancy ?? 0);
   const isFull = effectiveOccupancy >= effectiveCapacity;
 
+  const handleLogout = () => {
+    localStorage.removeItem('token');
+    localStorage.removeItem('user');
+    toast({ title: 'Logged out', description: 'Your session has ended.' });
+    navigate('/driver/login');
+  };
+
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-slate-50 via-blue-50 to-slate-100 p-3 sm:p-4 md:p-6">
-      {/* Header */}
-      <div className="mb-6">
-        <h1 className="text-3xl md:text-4xl font-bold text-slate-900">Driver Dashboard</h1>
-        <p className="text-slate-600 text-sm md:text-base mt-1">Manage your ride requests and location</p>
-      </div>
+    <div className="min-h-screen bg-gradient-to-br from-slate-50 via-blue-50 to-slate-100 flex flex-col">
+      <Header />
 
-      {/* Location Permission Helper Banner */}
-      <div className="bg-gradient-to-r from-blue-50 to-cyan-50 border-l-4 border-blue-500 rounded-lg p-4 mb-6 shadow-sm">
-        <div className="flex items-start gap-3">
-          <MapPin className="h-5 w-5 text-blue-600 mt-0.5 flex-shrink-0" />
-          <div>
-            <h3 className="font-semibold text-blue-900 mb-1">📍 Location Sharing Active</h3>
-            <p className="text-sm text-blue-800">
-              Your location is being automatically shared when you load this page. You can control location sharing using the <strong>"Share Location"</strong> button below.
-              <br />
-              <strong>Go Online:</strong> Click "Go Online" to accept new ride requests. Location must be shared first.
-            </p>
+      <div className="bg-gradient-to-r from-primary via-blue-600 to-cyan-600 text-white py-8 sm:py-10 shadow-xl border-b-4 border-cyan-300">
+        <div className="max-w-7xl mx-auto px-3 sm:px-4 md:px-6">
+          <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
+            <div className="flex items-center gap-4">
+              <div className="w-14 h-14 bg-gradient-to-br from-cyan-400 to-blue-500 rounded-xl flex items-center justify-center shadow-lg">
+                <Truck className="h-7 w-7 text-white" />
+              </div>
+              <div>
+                <h1 className="text-3xl sm:text-4xl font-bold tracking-tight">Driver Dashboard</h1>
+                <p className="text-sm text-blue-100 mt-1 font-medium">Live operations, location sharing and ride management</p>
+              </div>
+            </div>
+
+            <Button
+              onClick={handleLogout}
+              className="w-full sm:w-auto bg-red-500 hover:bg-red-600 text-white font-semibold shadow-lg hover:shadow-xl transition-all duration-200 px-6 py-2 h-auto"
+            >
+              <LogOut className="h-4 w-4 mr-2" />
+              Logout
+            </Button>
           </div>
         </div>
       </div>
 
-      {driver ? (
-        <div className="grid grid-cols-1 xl:grid-cols-3 gap-4 md:gap-6">
+      <main className="w-full max-w-7xl mx-auto px-3 sm:px-4 md:px-6 pt-4 md:pt-6 pb-6 flex-1">
+        {/* Location Permission Helper Banner */}
+        <div className="bg-gradient-to-r from-blue-50 to-cyan-50 border-l-4 border-blue-500 rounded-lg p-4 mb-6 shadow-sm">
+          <div className="flex items-start gap-3">
+            <MapPin className="h-5 w-5 text-blue-600 mt-0.5 flex-shrink-0" />
+            <div>
+              <h3 className="font-semibold text-blue-900 mb-1">📍 Location Sharing Active</h3>
+              <p className="text-sm text-blue-800">
+                Your location is being automatically shared when you load this page. You can control location sharing using the <strong>"Share Location"</strong> button below.
+                <br />
+                <strong>Go Online:</strong> Click "Go Online" to accept new ride requests. Location must be shared first.
+              </p>
+            </div>
+          </div>
+        </div>
+
+        {driver ? (
+          <div className="grid grid-cols-1 xl:grid-cols-3 gap-4 md:gap-6">
         <div className="xl:col-span-2">
           {/* Driver Info Card */}
           <div className="bg-white rounded-xl shadow-md hover:shadow-lg transition-shadow p-5 md:p-6 mb-4 md:mb-6">
@@ -847,11 +878,19 @@ export default function DriverDashboard() {
               </div>
             </div>
           </div>
+          </div>
+          </div>
+        ) : (
+          <p>Loading driver profile...</p>
+        )}
+      </main>
+
+      <footer className="border-t border-slate-200 bg-white/80 backdrop-blur">
+        <div className="max-w-7xl mx-auto px-3 sm:px-4 md:px-6 py-4 flex flex-col sm:flex-row items-center justify-between gap-2 text-xs text-slate-600">
+          <span>© {new Date().getFullYear()} MatatuConnect Driver Portal</span>
+          <span className="text-slate-500">Ride updates, location sharing and admin support in one place.</span>
         </div>
-        </div>
-      ) : (
-        <p>Loading driver profile...</p>
-      )}
+      </footer>
 
     </div>
   );

@@ -46,6 +46,7 @@ const STK_FAILURE_GRACE_MS = 15000;
 const STK_TIMEOUT_FAILURE_GRACE_MS = 60000;
 const STK_TIMEOUT_FAILURE_THRESHOLD = 2;
 const ASSUMED_SUCCESS_DELAY_MS = 10000;
+const ENABLE_AUTO_PAYMENT_WHATSAPP = String(process.env.ENABLE_AUTO_PAYMENT_WHATSAPP || 'false').toLowerCase() === 'true';
 const stkQueryLastRunByCheckout = new Map();
 const stkTimeoutCountByCheckout = new Map();
 
@@ -72,6 +73,103 @@ const emitPaymentStatusUpdate = (io, payment, extras = {}) => {
 };
 
 class PaymentController {
+  static async sendTicketToWhatsApp(req, res) {
+    try {
+      const paymentId = Number(req.params.paymentId);
+      console.log('[PaymentController.sendTicketToWhatsApp] Called with paymentId:', paymentId, 'from params:', req.params);
+      
+      if (!Number.isFinite(paymentId) || paymentId <= 0) {
+        console.error('[PaymentController] Invalid paymentId:', paymentId);
+        return res.status(400).json({ message: 'A valid payment ID is required', paymentId });
+      }
+
+      const payment = await PaymentModel.getPaymentByIdWithDetails(paymentId);
+      if (!payment) {
+        console.error('[PaymentController] Payment not found for paymentId:', paymentId);
+        return res.status(404).json({ message: 'Payment not found', paymentId });
+      }
+
+      console.log('[PaymentController] Found payment:', { id: payment.id, status: payment.status, phone: payment.phone_number });
+      
+      if (String(payment.status).toLowerCase() !== 'completed') {
+        console.error('[PaymentController] Payment not completed, status:', payment.status);
+        return res.status(400).json({ message: 'Ticket can only be sent after payment is completed', status: payment.status });
+      }
+
+      const normalizedPhone = normalizePhoneNumber(payment.phone_number);
+      if (!normalizedPhone) {
+        console.error('[PaymentController] Could not normalize phone number:', payment.phone_number);
+        return res.status(400).json({ message: 'Payment does not have a valid phone number for WhatsApp', phone: payment.phone_number });
+      }
+
+      console.log('[PaymentController] Sending WhatsApp to normalized phone:', normalizedPhone);
+      const ticketReference = getSafeTicketReference(payment);
+      const whatsappResult = await WhatsappService.sendPaymentConfirmation(normalizedPhone, {
+        routeName: payment.route_name || `Route ${payment.route_id}`,
+        vehicleNumber: payment.vehicle_number || 'N/A',
+        amount: payment.amount,
+        transactionId: ticketReference,
+      });
+
+      console.log('[PaymentController] WhatsApp send result:', whatsappResult);
+      
+      if (whatsappResult?.success === false) {
+        console.error('[PaymentController] WhatsApp send failed:', whatsappResult);
+        
+        // If user is not in sandbox, automatically send SMS with join instructions
+        if (whatsappResult?.code === 63007 || whatsappResult?.needsJoin) {
+          console.log('[PaymentController] User not in WhatsApp sandbox, sending SMS join instructions...');
+          try {
+            const joinMessage = `🎯 MatatuConnect - WhatsApp Setup Required
+
+To get your ticket via WhatsApp:
+
+1️⃣ Open WhatsApp
+2️⃣ Message: +1 415 523 8886
+3️⃣ Send: join break-additional
+4️⃣ Confirm sandbox invitation
+5️⃣ Your ticket will appear here!
+
+⏱️ Setup takes 30 seconds
+✨ After setup, you'll get WhatsApp tickets instantly!`;
+
+            await SmsService.sendSms(payment.phone_number, joinMessage);
+            console.log('[PaymentController] ✓ SMS join instructions sent successfully');
+            
+            return res.status(202).json({
+              message: 'WhatsApp not available yet. Instructions sent via SMS!',
+              needsSetup: true,
+              setupMethod: 'sms_sent',
+              details: 'Check your SMS for WhatsApp setup instructions. You\'ll need to join the WhatsApp sandbox first.',
+              whatsapp: whatsappResult,
+            });
+          } catch (smsError) {
+            console.error('[PaymentController] Failed to send SMS instructions:', smsError.message);
+            return res.status(502).json({
+              message: 'WhatsApp not available and could not send SMS instructions',
+              whatsapp: whatsappResult,
+            });
+          }
+        }
+        
+        return res.status(502).json({
+          message: 'WhatsApp send failed',
+          whatsapp: whatsappResult,
+        });
+      }
+
+      console.log('[PaymentController] WhatsApp ticket sent successfully to:', normalizedPhone);
+      return res.status(200).json({
+        message: 'Ticket sent to WhatsApp',
+        ticket_reference: ticketReference,
+        whatsapp: whatsappResult || { success: true },
+      });
+    } catch (error) {
+      console.error('[PaymentController] Send ticket to WhatsApp error:', error);
+      return res.status(500).json({ message: 'Failed to send ticket via WhatsApp', error: error.message, stack: error.stack });
+    }
+  }
+
   static async finalizeAssumedSuccessPayment(paymentId, io = null) {
     const assumedTransactionId = `ASSUMED-${paymentId}-${Date.now()}`;
     const completedPayment = await PaymentModel.updatePaymentStatus(
@@ -92,7 +190,9 @@ class PaymentController {
       amount: normalizedCompleted.amount,
     });
 
-    PaymentController.queuePaymentWhatsAppNotifications(normalizedCompleted, ticketReference);
+    if (ENABLE_AUTO_PAYMENT_WHATSAPP) {
+      PaymentController.queuePaymentWhatsAppNotifications(normalizedCompleted, ticketReference);
+    }
     await PaymentController.autoIncrementOccupancy(normalizedCompleted, io);
     return normalizedCompleted;
   }
@@ -102,12 +202,24 @@ class PaymentController {
 
     try {
       if (paymentRecord.phone_number) {
-        await WhatsappService.sendPaymentConfirmation(paymentRecord.phone_number, {
+        const whatsappResult = await WhatsappService.sendPaymentConfirmation(paymentRecord.phone_number, {
           routeName: paymentRecord.route_name || `Route ${paymentRecord.route_id}`,
           vehicleNumber: paymentRecord.vehicle_number || 'N/A',
           amount: paymentRecord.amount,
           transactionId: ticketReference,
         });
+        
+        // If user is not in sandbox, send SMS with join instructions
+        if (whatsappResult?.code === 63007 || whatsappResult?.needsJoin) {
+          console.log('[SendPaymentWhatsApp] User not in sandbox, sending SMS join instructions');
+          try {
+            const joinMessage = `🎯 MatatuConnect - WhatsApp Setup Required\n\nTo get your ticket via WhatsApp:\n\n1️⃣ Open WhatsApp\n2️⃣ Message: +1 415 523 8886\n3️⃣ Send: join break-additional\n4️⃣ Confirm sandbox invitation\n5️⃣ Your ticket will appear here!\n\n⏱️ Setup takes 30 seconds\n✨ After setup, you'll get WhatsApp tickets instantly!`;
+            await SmsService.sendSms(paymentRecord.phone_number, joinMessage);
+            console.log('[SendPaymentWhatsApp] ✓ SMS join instructions sent to customer');
+          } catch (smsError) {
+            console.error('[SendPaymentWhatsApp] Failed to send SMS join instructions:', smsError.message);
+          }
+        }
       }
     } catch (whatsappError) {
       console.error('WhatsApp notification to customer failed:', whatsappError.message);
@@ -117,13 +229,25 @@ class PaymentController {
       try {
         const driver = await DriverModel.getDriverByVehicleId(paymentRecord.vehicle_id);
         if (driver && driver.phone) {
-          await WhatsappService.sendPaymentConfirmation(driver.phone, {
+          const driverWhatsappResult = await WhatsappService.sendPaymentConfirmation(driver.phone, {
             routeName: paymentRecord.route_name || `Route ${paymentRecord.route_id}`,
             vehicleNumber: paymentRecord.vehicle_number || 'N/A',
             amount: paymentRecord.amount,
             transactionId: ticketReference,
             recipientType: 'driver',
           });
+          
+          // If driver is not in sandbox, send SMS with join instructions
+          if (driverWhatsappResult?.code === 63007 || driverWhatsappResult?.needsJoin) {
+            console.log('[SendPaymentWhatsApp] Driver not in sandbox, sending SMS join instructions');
+            try {
+              const joinMessage = `🎯 MatatuConnect - WhatsApp Setup Required\n\nTo get payment notifications via WhatsApp:\n\n1️⃣ Open WhatsApp\n2️⃣ Message: +1 415 523 8886\n3️⃣ Send: join break-additional\n4️⃣ Confirm sandbox invitation\n\n⏱️ Setup takes 30 seconds\n✨ After setup, receive instant payment alerts!`;
+              await SmsService.sendSms(driver.phone, joinMessage);
+              console.log('[SendPaymentWhatsApp] ✓ SMS join instructions sent to driver');
+            } catch (smsError) {
+              console.error('[SendPaymentWhatsApp] Failed to send SMS join instructions to driver:', smsError.message);
+            }
+          }
         }
       } catch (driverError) {
         console.error('WhatsApp notification to driver failed:', driverError.message);
@@ -259,7 +383,9 @@ class PaymentController {
             route_name: result.route_name || null,
             amount: result.amount,
           });
-          PaymentController.queuePaymentWhatsAppNotifications(result, ticketReference);
+          if (ENABLE_AUTO_PAYMENT_WHATSAPP) {
+            PaymentController.queuePaymentWhatsAppNotifications(result, ticketReference);
+          }
           // Auto-increment vehicle occupancy from this completed payment
           await PaymentController.autoIncrementOccupancy(updated, io);
           paymentDebugLog('reconcile.marked.completed', {
@@ -593,7 +719,9 @@ class PaymentController {
           amount: updatedPayment.amount,
         });
 
-        PaymentController.queuePaymentWhatsAppNotifications(paymentWithDetails || updatedPayment, ticketReference);
+        if (ENABLE_AUTO_PAYMENT_WHATSAPP) {
+          PaymentController.queuePaymentWhatsAppNotifications(paymentWithDetails || updatedPayment, ticketReference);
+        }
 
         console.log(`✓ Payment verified and completed for payment_id=${updatedPayment.id}`);
         paymentDebugLog('callback.marked.completed', {
@@ -711,24 +839,26 @@ class PaymentController {
           console.error('SMS notification failed:', smsError);
         }
 
-        try {
-          const whatsappResult = await WhatsappService.sendPaymentConfirmation(phoneNumber, {
-            routeName: `Route ${routeId}`,
-            vehicleNumber: incomingVehicle || undefined,
-            amount: amount,
-            transactionId: simulatedTransactionId
-          });
+        if (ENABLE_AUTO_PAYMENT_WHATSAPP) {
+          try {
+            const whatsappResult = await WhatsappService.sendPaymentConfirmation(phoneNumber, {
+              routeName: `Route ${routeId}`,
+              vehicleNumber: incomingVehicle || undefined,
+              amount: amount,
+              transactionId: simulatedTransactionId
+            });
 
-          if (whatsappResult?.success === false && (whatsappResult.needsJoin || whatsappResult.code === 63007)) {
-            try {
-              const joinInstructions = `MatatuConnect: Payment received KES ${amount}! Get WhatsApp alerts - Send "join break-additional" to +14155238886. Takes 5 sec!`;
-              await SmsService.sendSms(phoneNumber, joinInstructions);
-            } catch (smsFallbackError) {
-              console.error('SMS join instructions failed:', smsFallbackError.message);
+            if (whatsappResult?.success === false && (whatsappResult.needsJoin || whatsappResult.code === 63007)) {
+              try {
+                const joinInstructions = `MatatuConnect: Payment received KES ${amount}! Get WhatsApp alerts - Send "join break-additional" to +14155238886. Takes 5 sec!`;
+                await SmsService.sendSms(phoneNumber, joinInstructions);
+              } catch (smsFallbackError) {
+                console.error('SMS join instructions failed:', smsFallbackError.message);
+              }
             }
+          } catch (whatsappError) {
+            console.error('WhatsApp notification failed:', whatsappError.message);
           }
-        } catch (whatsappError) {
-          console.error('WhatsApp notification failed:', whatsappError.message);
         }
       });
 
@@ -742,7 +872,7 @@ class PaymentController {
         notificationsSent: {
           sms: false,
           whatsapp: false,
-          queued: true
+          queued: ENABLE_AUTO_PAYMENT_WHATSAPP
         }
       });
     } catch (error) {
