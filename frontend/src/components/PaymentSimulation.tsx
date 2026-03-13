@@ -28,6 +28,12 @@ type RouteOption = {
   fare: number;
 };
 
+type RouteVehicleOption = {
+  id: number;
+  registration: string;
+  isFull: boolean;
+};
+
 const PaymentSimulation = ({
   initialRouteId,
   initialVehicleNumber,
@@ -42,7 +48,7 @@ const PaymentSimulation = ({
   const [selectedRouteId, setSelectedRouteId] = useState<string>(initialRouteId ?? '');
   const [routes, setRoutes] = useState<RouteOption[]>([]);
   const [routesLoading, setRoutesLoading] = useState(false);
-  const [routeVehicles, setRouteVehicles] = useState<string[]>([]);
+  const [routeVehicles, setRouteVehicles] = useState<RouteVehicleOption[]>([]);
   const [vehiclesLoading, setVehiclesLoading] = useState(false);
   const [selectedVehicle, setSelectedVehicle] = useState<string>(initialVehicleNumber ?? '');
   const [isProcessing, setIsProcessing] = useState(false);
@@ -147,19 +153,54 @@ const PaymentSimulation = ({
 
       setVehiclesLoading(true);
       try {
-        const vehiclesRes = await api.vehicles.getByRoute(Number(selectedRouteId));
+        const [vehiclesRes, occupancyRes] = await Promise.all([
+          api.vehicles.getByRoute(Number(selectedRouteId)),
+          api.occupancy.getAll(),
+        ]);
+
         const vehicleList = Array.isArray(vehiclesRes)
           ? vehiclesRes
           : Array.isArray((vehiclesRes as any)?.vehicles)
             ? (vehiclesRes as any).vehicles
             : [];
 
+        const occupancyList = Array.isArray(occupancyRes)
+          ? occupancyRes
+          : Array.isArray((occupancyRes as any)?.occupancies)
+            ? (occupancyRes as any).occupancies
+            : [];
+
+        const occupancyByVehicle = new Map<number, { current: number; capacity: number; status: string }>();
+        occupancyList.forEach((entry: any) => {
+          const id = Number(entry.vehicle_id ?? entry.vehicleId ?? 0);
+          if (!id) return;
+          occupancyByVehicle.set(id, {
+            current: Number(entry.current_occupancy ?? 0),
+            capacity: Number(entry.capacity ?? 14),
+            status: String(entry.occupancy_status || '').toLowerCase(),
+          });
+        });
+
         const mapped = vehicleList
-          .map((v: any) => v.registration_number || v.registration || v.number || '')
-          .filter((value: string) => Boolean(value));
+          .map((v: any) => {
+            const id = Number(v.id || 0);
+            const registration = (v.registration_number || v.registration || v.number || '').toString();
+            if (!id || !registration) return null;
+            const occ = occupancyByVehicle.get(id);
+            const isFull = Boolean(occ) && (occ.current >= occ.capacity || occ.status === 'full');
+            return { id, registration, isFull };
+          })
+          .filter((value: RouteVehicleOption | null): value is RouteVehicleOption => Boolean(value));
 
         if (active) {
           setRouteVehicles(mapped);
+          if (!vehicleLocked && selectedVehicle) {
+            const selected = mapped.find((v) => v.registration === selectedVehicle);
+            if (selected?.isFull) {
+              setSelectedVehicle('');
+              setVehicleNumber('');
+            }
+          }
         }
       } catch (error: any) {
         if (active) {
@@ -186,6 +227,11 @@ const PaymentSimulation = ({
   }, [selectedVehicle]);
 
   const vehicleValid = validateVehicleNumber(vehicleNumber);
+  const selectedVehicleMeta = useMemo(
+    () => routeVehicles.find((v) => v.registration === selectedVehicle || v.registration === vehicleNumber),
+    [routeVehicles, selectedVehicle, vehicleNumber]
+  );
+  const selectedVehicleIsFull = Boolean(selectedVehicleMeta?.isFull);
   const phoneValid = phoneNumber.trim().length >= 9;
   const selectedRoute = availableRoutes.find((r) => r.id === selectedRouteId);
   const fare = selectedRoute?.fare ?? initialRouteFallback?.fare ?? 0;
@@ -392,6 +438,15 @@ const PaymentSimulation = ({
       return;
     }
 
+    if (selectedVehicleIsFull) {
+      showPaymentToast({
+        title: 'Vehicle Full',
+        description: 'This vehicle is currently full. Please choose another vehicle.',
+        variant: 'destructive',
+      });
+      return;
+    }
+
     const routeIdNumber = Number(selectedRouteId);
     if (!selectedRouteId || Number.isNaN(routeIdNumber)) {
       showPaymentToast({
@@ -552,7 +607,9 @@ const PaymentSimulation = ({
             <option value="">No vehicles available</option>
           )}
           {routeVehicles.map((vehicle) => (
-            <option key={vehicle} value={vehicle}>{vehicle}</option>
+            <option key={vehicle.id} value={vehicle.registration} disabled={vehicle.isFull}>
+              {vehicle.registration}{vehicle.isFull ? ' (Full)' : ''}
+            </option>
           ))}
         </select>
         <Input
@@ -575,6 +632,12 @@ const PaymentSimulation = ({
         />
         {vehicleLocked && (
           <p className="text-xs text-muted-foreground">Vehicle is pre-selected from occupancy.</p>
+        )}
+        {selectedVehicleIsFull && (
+          <p className="text-xs text-destructive flex items-center gap-1">
+            <AlertCircle className="h-3 w-3" />
+            This vehicle is full and cannot accept new payments.
+          </p>
         )}
         {vehicleNumber && !vehicleValid && (
           <p className="text-xs text-destructive flex items-center gap-1">
@@ -730,7 +793,7 @@ const PaymentSimulation = ({
         <Button
           onClick={handlePayment}
           variant="hero"
-          disabled={!vehicleValid || !phoneValid || isProcessing}
+          disabled={!vehicleValid || !phoneValid || isProcessing || selectedVehicleIsFull}
           className="w-full sm:flex-1 text-sm"
         >
           {isProcessing ? (

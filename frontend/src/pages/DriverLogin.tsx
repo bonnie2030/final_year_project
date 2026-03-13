@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { Helmet } from 'react-helmet-async';
 import Header from '@/components/Header';
-import { Bus, AlertCircle, LogOut } from 'lucide-react';
+import { Bus, AlertCircle, ShieldCheck, Clock3, KeyRound, Eye, EyeOff } from 'lucide-react';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
 import { Label } from '@/components/ui/label';
@@ -104,8 +104,43 @@ export default function DriverLogin() {
 
       <Header />
 
-      <div className="container max-w-md mx-auto py-12">
-        <div className="bg-white/90 rounded-2xl p-6 sm:p-8 shadow-2xl border border-gray-100">
+      <div className="container max-w-6xl mx-auto py-10 sm:py-14 px-4">
+        <div className="grid lg:grid-cols-5 gap-6 sm:gap-8 items-start">
+          <section className="lg:col-span-2 rounded-3xl bg-gradient-to-br from-sky-600 via-blue-600 to-cyan-600 text-white p-6 sm:p-8 shadow-2xl">
+            <div className="inline-flex items-center justify-center w-14 h-14 rounded-2xl bg-white/15 backdrop-blur-sm mb-5">
+              <Bus className="h-7 w-7" />
+            </div>
+            <h1 className="text-3xl font-extrabold tracking-tight">Driver Portal</h1>
+            <p className="mt-3 text-sm sm:text-base text-blue-50/95">
+              Sign in to manage location sharing, ride operations, occupancy, and live updates.
+            </p>
+
+            <div className="mt-6 space-y-3 text-sm">
+              <div className="rounded-xl border border-white/15 bg-white/10 p-3 flex items-start gap-3">
+                <ShieldCheck className="h-5 w-5 mt-0.5" />
+                <div>
+                  <p className="font-semibold">Single-session protection</p>
+                  <p className="text-blue-100/90 text-xs">Only one active device is allowed per driver account.</p>
+                </div>
+              </div>
+              <div className="rounded-xl border border-white/15 bg-white/10 p-3 flex items-start gap-3">
+                <Clock3 className="h-5 w-5 mt-0.5" />
+                <div>
+                  <p className="font-semibold">Live operational access</p>
+                  <p className="text-blue-100/90 text-xs">Track routes and go online as soon as login succeeds.</p>
+                </div>
+              </div>
+              <div className="rounded-xl border border-white/15 bg-white/10 p-3 flex items-start gap-3">
+                <KeyRound className="h-5 w-5 mt-0.5" />
+                <div>
+                  <p className="font-semibold">Admin-issued credentials</p>
+                  <p className="text-blue-100/90 text-xs">Use the driver username created from the admin dashboard.</p>
+                </div>
+              </div>
+            </div>
+          </section>
+
+          <section className="lg:col-span-3 bg-white/90 rounded-2xl p-6 sm:p-8 shadow-2xl border border-gray-100">
           {sessionInvalidated && (
             <div className="mb-6 p-4 bg-amber-50 border border-amber-200 rounded-lg flex items-start gap-3">
               <AlertCircle className="h-5 w-5 text-amber-600 mt-0.5 flex-shrink-0" />
@@ -139,7 +174,9 @@ export default function DriverLogin() {
               <Label className="text-sm">Password</Label>
               <div className="relative">
                 <Input type={showPassword ? 'text' : 'password'} value={password} onChange={(e) => setPassword(e.target.value)} placeholder="Enter your password" />
-                <button type="button" className="absolute right-3 top-1/2 -translate-y-1/2 text-sm text-muted-foreground" onClick={() => setShowPassword(s => !s)}>{showPassword ? 'Hide' : 'Show'}</button>
+                <button type="button" className="absolute right-3 top-1/2 -translate-y-1/2 text-sm text-muted-foreground" onClick={() => setShowPassword(s => !s)} aria-label={showPassword ? 'Hide password' : 'Show password'}>
+                  {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                </button>
               </div>
             </div>
 
@@ -166,6 +203,7 @@ export default function DriverLogin() {
 
             <div className="text-sm text-muted-foreground mt-2">Tip: the admin dashboard can create driver accounts and provide credentials.</div>
           </div>
+          </section>
         </div>
       </div>
     </div>

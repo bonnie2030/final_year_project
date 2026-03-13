@@ -281,3 +281,18 @@
     @apply bg-destructive/10 text-destructive border border-destructive/20;
   }
 }
+
+/* Keep all Leaflet layers below sticky headers/navigation bars. */
+.leaflet-container {
+  position: relative;
+  z-index: 0 !important;
+}
+
+.leaflet-pane,
+.leaflet-control,
+.leaflet-top,
+.leaflet-bottom,
+.leaflet-popup,
+.leaflet-tooltip {
+  z-index: 20 !important;
+}

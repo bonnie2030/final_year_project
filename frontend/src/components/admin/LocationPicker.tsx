@@ -11,6 +11,7 @@ import L from "leaflet";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { useToast } from "@/hooks/use-toast";
+import LeafletAutoResize from "@/components/Map/LeafletAutoResize";
 
 delete (L.Icon.Default.prototype as any)._getIconUrl;
 L.Icon.Default.mergeOptions({
@@ -233,9 +234,10 @@ const LocationPicker = ({
         <MapContainer
           center={[defaultLat, defaultLng]}
           zoom={13}
-          scrollWheelZoom={true}
+          scrollWheelZoom={false}
           style={{ width: "100%", height: "100%" }}
         >
+          <LeafletAutoResize watch={[latitude, longitude, mapHeight]} />
           <TileLayer
             attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
             url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"

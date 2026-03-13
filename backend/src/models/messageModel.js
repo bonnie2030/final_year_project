@@ -150,7 +150,9 @@ class MessageModel {
           (SELECT created_at FROM messages WHERE whatsapp_phone = m.whatsapp_phone ORDER BY created_at DESC LIMIT 1) as last_message_at,
           (SELECT message_type FROM messages WHERE whatsapp_phone = m.whatsapp_phone ORDER BY created_at DESC LIMIT 1) as last_message_type,
           (SELECT direction FROM messages WHERE whatsapp_phone = m.whatsapp_phone ORDER BY created_at DESC LIMIT 1) as last_direction,
-          (SELECT COUNT(*) FROM messages WHERE whatsapp_phone = m.whatsapp_phone AND direction = 'incoming' AND is_read = false) as unread_count
+          (SELECT COUNT(*) FROM messages WHERE whatsapp_phone = m.whatsapp_phone AND direction = 'incoming' AND is_read = false) as unread_count,
+          (SELECT COUNT(*) FROM messages WHERE whatsapp_phone = m.whatsapp_phone AND direction = 'outgoing' AND message_type IN ('payment_confirmation', 'payment_notification')) as payment_sent_count,
+          (SELECT COUNT(*) FROM messages WHERE whatsapp_phone = m.whatsapp_phone AND direction = 'outgoing' AND message_type = 'lost_and_found_confirmation') as lost_found_sent_count
         FROM messages m
         WHERE m.whatsapp_phone IS NOT NULL
         ORDER BY last_message_at DESC

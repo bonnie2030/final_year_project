@@ -73,6 +73,27 @@ const emitPaymentStatusUpdate = (io, payment, extras = {}) => {
 };
 
 class PaymentController {
+  static async getVehiclePaymentAvailability(vehicleId) {
+    const vehicle = await VehicleModel.getVehicleById(vehicleId);
+    if (!vehicle) {
+      return { available: false, reason: 'Vehicle not found' };
+    }
+
+    const capacity = Number(vehicle.capacity || 14);
+    const occupancy = await OccupancyModel.getOccupancyStatus(vehicleId);
+    const currentOccupancy = Number(occupancy?.current_occupancy || 0);
+    const isFullByCount = currentOccupancy >= capacity;
+    const isFullByStatus = String(occupancy?.occupancy_status || '').toLowerCase() === 'full';
+
+    return {
+      available: !(isFullByCount || isFullByStatus),
+      reason: isFullByCount || isFullByStatus ? 'Vehicle is full' : null,
+      vehicle,
+      currentOccupancy,
+      capacity,
+    };
+  }
+
   static async sendTicketToWhatsApp(req, res) {
     try {
       const paymentId = Number(req.params.paymentId);
@@ -530,11 +551,32 @@ To get your ticket via WhatsApp:
       if (vehicle) {
         const foundVehicle = await VehicleModel.getVehicleByRegistration(String(vehicle).trim().toUpperCase());
         vehicleId = foundVehicle?.id || null;
+
+        if (!vehicleId) {
+          return res.status(404).json({ message: 'Selected vehicle was not found' });
+        }
+
+        const availability = await PaymentController.getVehiclePaymentAvailability(vehicleId);
+        if (!availability.available) {
+          return res.status(409).json({
+            message: 'This vehicle is full. Please select another vehicle.',
+            reason: availability.reason,
+            vehicle_id: vehicleId,
+            current_occupancy: availability.currentOccupancy,
+            capacity: availability.capacity,
+          });
+        }
       }
       // Auto-assign the active vehicle for this route if none specified
       if (!vehicleId && parsedRouteId) {
         const activeVehicle = await VehicleModel.getActiveVehicleForRoute(parsedRouteId);
         vehicleId = activeVehicle?.id || null;
+        if (!vehicleId) {
+          return res.status(409).json({
+            message: 'All vehicles on this route are currently full. Please try again later.',
+            reason: 'ROUTE_FULL',
+          });
+        }
       }
 
       paymentRecord = await PaymentModel.initiatePayment(
@@ -796,12 +838,33 @@ To get your ticket via WhatsApp:
       if (incomingVehicle) {
         const foundVehicle = await VehicleModel.getVehicleByRegistration(incomingVehicle);
         vehicleId = foundVehicle?.id || null;
+
+        if (!vehicleId) {
+          return res.status(404).json({ message: 'Selected vehicle was not found' });
+        }
+
+        const availability = await PaymentController.getVehiclePaymentAvailability(vehicleId);
+        if (!availability.available) {
+          return res.status(409).json({
+            message: 'This vehicle is full. Please select another vehicle.',
+            reason: availability.reason,
+            vehicle_id: vehicleId,
+            current_occupancy: availability.currentOccupancy,
+            capacity: availability.capacity,
+          });
+        }
       }
 
       // Auto-assign the active vehicle for this route if none specified
       if (!vehicleId) {
         const activeVehicle = await VehicleModel.getActiveVehicleForRoute(Number(routeId));
         vehicleId = activeVehicle?.id || null;
+        if (!vehicleId) {
+          return res.status(409).json({
+            message: 'All vehicles on this route are currently full. Please try again later.',
+            reason: 'ROUTE_FULL',
+          });
+        }
       }
 
       // Create payment record

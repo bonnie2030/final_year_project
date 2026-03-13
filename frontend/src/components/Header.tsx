@@ -126,8 +126,6 @@ function MenuButton({ pathname }: { pathname: string }) {
 const Header = () => {
   const location = useLocation();
   const { saccoName } = useSaccoName();
-  const userRole = (localStorage.getItem('userRole') || 'passenger') as 'passenger' | 'driver' | 'admin';
-  const roleLabel = userRole === 'admin' ? 'Admin' : userRole === 'driver' ? 'Driver' : 'Passenger';
 
   return (
     <header className="sticky top-0 z-50 w-full bg-white/95 dark:bg-gray-950/95 backdrop-blur-md shadow-md border-b border-gray-200 dark:border-gray-800">
@@ -191,10 +189,6 @@ const Header = () => {
               </Link>
             );
           })}
-
-          <span className="ml-2 hidden xl:inline-flex items-center rounded-full border border-emerald-200 bg-emerald-50 px-3 py-1 text-xs font-semibold text-emerald-800 dark:border-emerald-900 dark:bg-emerald-950/40 dark:text-emerald-300">
-            {roleLabel} View
-          </span>
         </nav>
 
         {/* Mobile menu button */}
