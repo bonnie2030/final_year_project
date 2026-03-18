@@ -562,22 +562,22 @@ export default function DriverDashboard() {
     <div className="min-h-screen bg-gradient-to-br from-slate-50 via-blue-50 to-slate-100 flex flex-col">
       <Header />
 
-      <div className="bg-gradient-to-r from-primary via-blue-600 to-cyan-600 text-white py-8 sm:py-10 shadow-xl border-b-4 border-cyan-300">
+      <div className="bg-gradient-to-r from-primary via-blue-600 to-cyan-600 text-white py-6 sm:py-10 shadow-xl border-b-4 border-cyan-300">
         <div className="max-w-7xl mx-auto px-3 sm:px-4 md:px-6">
-          <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
-            <div className="flex items-center gap-4">
-              <div className="w-14 h-14 bg-gradient-to-br from-cyan-400 to-blue-500 rounded-xl flex items-center justify-center shadow-lg">
-                <Truck className="h-7 w-7 text-white" />
+          <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 sm:gap-4">
+            <div className="flex items-center gap-3 sm:gap-4 min-w-0">
+              <div className="w-11 h-11 sm:w-14 sm:h-14 flex-shrink-0 bg-gradient-to-br from-cyan-400 to-blue-500 rounded-xl flex items-center justify-center shadow-lg">
+                <Truck className="h-6 w-6 sm:h-7 sm:w-7 text-white" />
               </div>
-              <div>
-                <h1 className="text-3xl sm:text-4xl font-bold tracking-tight">Driver Dashboard</h1>
-                <p className="text-sm text-blue-100 mt-1 font-medium">Live operations, location sharing and ride management</p>
+              <div className="min-w-0">
+                <h1 className="text-2xl sm:text-3xl md:text-4xl font-bold tracking-tight leading-tight">Driver Dashboard</h1>
+                <p className="text-xs sm:text-sm text-blue-100 mt-0.5 font-medium truncate">Live operations, location sharing &amp; ride management</p>
               </div>
             </div>
 
             <Button
               onClick={handleLogout}
-              className="w-full sm:w-auto bg-red-500 hover:bg-red-600 text-white font-semibold shadow-lg hover:shadow-xl transition-all duration-200 px-6 py-2 h-auto"
+              className="w-full sm:w-auto flex-shrink-0 bg-red-500 hover:bg-red-600 text-white font-semibold shadow-lg hover:shadow-xl transition-all duration-200 px-4 sm:px-6 py-2 h-auto"
             >
               <LogOut className="h-4 w-4 mr-2" />
               Logout
@@ -603,8 +603,8 @@ export default function DriverDashboard() {
         </div>
 
         {driver ? (
-          <div className="grid grid-cols-1 xl:grid-cols-3 gap-4 md:gap-6">
-        <div className="xl:col-span-2">
+          <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 md:gap-6">
+        <div className="lg:col-span-2">
           {/* Driver Info Card */}
           <div className="bg-white rounded-xl shadow-md hover:shadow-lg transition-shadow p-5 md:p-6 mb-4 md:mb-6">
             <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-4">
@@ -618,9 +618,9 @@ export default function DriverDashboard() {
                   <span className="flex items-center gap-1"><Mail className="h-4 w-4" /> {driver.email}</span>
                 </div>
                 {locationEnabled && currentLocation && (
-                  <div className="flex items-center gap-2 text-xs md:text-sm text-green-700 bg-green-50 rounded-lg p-2 mt-3">
-                    <CheckCircle className="h-4 w-4" />
-                    <span>Location active: {currentLocation.latitude.toFixed(4)}°, {currentLocation.longitude.toFixed(4)}°</span>
+                  <div className="flex items-start gap-2 text-xs md:text-sm text-green-700 bg-green-50 rounded-lg p-2 mt-3">
+                    <CheckCircle className="h-4 w-4 flex-shrink-0 mt-0.5" />
+                    <span className="break-all">Location active: {currentLocation.latitude.toFixed(4)}°, {currentLocation.longitude.toFixed(4)}°</span>
                   </div>
                 )}
               </div>
@@ -675,8 +675,7 @@ export default function DriverDashboard() {
           </div>
 
           {/* Assigned Vehicle Card */}
-          <div className="grid grid-cols-1 gap-4 md:gap-6 mb-4 md:mb-6">
-            {/* Assigned Vehicle Card */}
+          <div className="mb-4 md:mb-6">
             <div className="bg-white rounded-xl shadow-md p-5 md:p-6">
               <div className="flex items-center justify-between mb-4">
                 <h3 className="font-bold text-lg text-slate-900 flex items-center gap-2">
@@ -725,20 +724,22 @@ export default function DriverDashboard() {
                       <Button
                         size="sm"
                         variant="outline"
-                        className="flex-1 border-red-300 text-red-700 hover:bg-red-50"
+                        className="flex-1 min-w-0 border-red-300 text-red-700 hover:bg-red-50 text-xs sm:text-sm"
                         onClick={() => adjustOccupancy('decrement')}
                         disabled={effectiveOccupancy <= 0}
                       >
-                        <Minus className="h-4 w-4 mr-1" /> Passenger Off
+                        <Minus className="h-3.5 w-3.5 sm:h-4 sm:w-4 mr-1 flex-shrink-0" />
+                        <span className="truncate">Passenger Off</span>
                       </Button>
                       <Button
                         size="sm"
                         variant="outline"
-                        className="flex-1 border-green-400 text-green-700 hover:bg-green-50"
+                        className="flex-1 min-w-0 border-green-400 text-green-700 hover:bg-green-50 text-xs sm:text-sm"
                         onClick={() => adjustOccupancy('increment')}
                         disabled={isFull}
                       >
-                        <Plus className="h-4 w-4 mr-1" /> Add Passenger
+                        <Plus className="h-3.5 w-3.5 sm:h-4 sm:w-4 mr-1 flex-shrink-0" />
+                        <span className="truncate">Add Passenger</span>
                       </Button>
                     </div>
                     <p className="text-[11px] text-slate-500 mt-2">
@@ -758,8 +759,7 @@ export default function DriverDashboard() {
           </div>
 
           {/* Tickets Section */}
-          <div className="grid grid-cols-1 gap-4 md:gap-6">
-            {/* Tickets Card */}
+          <div>
             <div className="bg-white rounded-xl shadow-md p-5 md:p-6">
               <h3 className="font-bold text-lg text-slate-900 mb-1 flex items-center gap-2">
                 <CreditCard className="h-5 w-5 text-green-600" />
@@ -777,14 +777,14 @@ export default function DriverDashboard() {
                 <div className="space-y-2 max-h-96 overflow-y-auto">
                   {tickets.slice(0, 20).map(t => (
                     <div key={t.id} className="p-3 border border-slate-200 rounded-lg hover:bg-green-50 transition">
-                      <div className="flex justify-between items-start gap-2">
-                        <div className="flex-1">
+                      <div className="flex flex-col xs:flex-row justify-between items-start gap-1 xs:gap-2">
+                        <div className="min-w-0 flex-1">
                           <div className="text-sm font-bold text-green-700">KES {t.amount}</div>
-                          <div className="text-xs text-slate-600">{t.route_name || `Route ${t.route_id}`}</div>
-                          <div className="text-xs text-slate-600 font-mono">{t.phone_number}</div>
+                          <div className="text-xs text-slate-600 truncate">{t.route_name || `Route ${t.route_id}`}</div>
+                          <div className="text-xs text-slate-600 font-mono truncate">{t.phone_number}</div>
                         </div>
-                        <div className="text-right">
-                          <div className="text-xs font-mono text-green-700 font-semibold">{t.transaction_id || t.checkout_request_id?.slice(-8)}</div>
+                        <div className="text-left xs:text-right flex-shrink-0">
+                          <div className="text-xs font-mono text-green-700 font-semibold break-all">{t.transaction_id || t.checkout_request_id?.slice(-8)}</div>
                           <div className="text-xs text-slate-600">{new Date(t.created_at).toLocaleDateString('en-KE', { day: '2-digit', month: 'short' })}</div>
                         </div>
                       </div>
@@ -797,7 +797,7 @@ export default function DriverDashboard() {
         </div>
 
         {/* Admin Chat Card - Full width on mobile, sidebar on desktop */}
-        <div className="xl:col-span-1">
+        <div className="lg:col-span-1">
           <div className="bg-gradient-to-br from-emerald-50 to-cyan-50 rounded-xl shadow-md overflow-hidden border border-emerald-200">
             {/* Chat Header */}
             <div className="bg-gradient-to-r from-emerald-600 to-teal-600 text-white p-4">
@@ -813,7 +813,7 @@ export default function DriverDashboard() {
             </div>
 
             {/* Messages Area */}
-            <div className="h-64 overflow-auto bg-white p-3 md:p-4 space-y-2">
+            <div className="h-56 sm:h-72 lg:h-80 overflow-auto bg-white p-3 md:p-4 space-y-2">
               {messageRows.map((row, idx) => {
                 if (row.type === 'day') {
                   return (

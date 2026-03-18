@@ -287,7 +287,7 @@ To get your ticket via WhatsApp:
   }
 
   // Auto-increment vehicle occupancy when a payment completes.
-  // Assigns vehicle_id to the payment if not set, then increments occupancy of the active vehicle.
+  // Uses an atomic DB upsert so concurrent payments cannot overcount or exceed capacity.
   static async autoIncrementOccupancy(payment, io = null) {
     if (!payment) return;
     try {
@@ -309,26 +309,31 @@ To get your ticket via WhatsApp:
       if (!vehicle) return;
 
       const capacity = Number(vehicle.capacity || 14);
-      const occupancyRecord = await OccupancyModel.getOccupancyStatus(vehicleId);
-      const currentOccupancy = Number(occupancyRecord?.current_occupancy || 0);
 
-      if (currentOccupancy >= capacity) return; // already full, next payment will go to next vehicle
+      // Atomically increment — the DB rejects the update if vehicle is already full
+      const { updated, row } = await OccupancyModel.incrementOccupancyIfNotFull(vehicleId, capacity);
 
-      const newOccupancy = currentOccupancy + 1;
-      const driverId = vehicle.user_id || null;
-      const updated = await OccupancyModel.updateOccupancyCount(vehicleId, driverId, newOccupancy, capacity);
+      if (!updated) {
+        // Vehicle was already full; this payment was recorded but should not have been allowed.
+        // Log for debugging — the availability pre-check in initiatePayment/simulatePayment
+        // should prevent reaching here under normal conditions.
+        console.warn(`[autoIncrementOccupancy] vehicle ${vehicleId} was full when payment ${payment.id} completed — occupancy not changed`);
+        return row;
+      }
 
       if (io) {
+        const driverId = vehicle.user_id || null;
         const payload = {
           vehicle_id: vehicleId,
-          current_occupancy: newOccupancy,
-          occupancy_status: updated.occupancy_status,
+          current_occupancy: row.current_occupancy,
+          occupancy_status: row.occupancy_status,
           capacity,
         };
         io.to('admin').emit('vehicle.occupancyUpdated', payload);
         if (driverId) io.to(`user_${driverId}`).emit('vehicle.occupancyUpdated', payload);
+        io.to(`vehicle_${vehicleId}`).emit('vehicle.occupancyUpdated', payload);
       }
-      return updated;
+      return row;
     } catch (err) {
       console.error('Auto increment occupancy error:', err.message);
     }
@@ -885,6 +890,8 @@ To get your ticket via WhatsApp:
               route_name: paymentWithDetails.route_name || null,
               amount: paymentWithDetails.amount,
             });
+            // Increment vehicle occupancy now that payment is confirmed
+            await PaymentController.autoIncrementOccupancy(paymentWithDetails, io);
           }
         } catch (simulateUpdateError) {
           console.error('Simulated payment completion update error:', simulateUpdateError.message);
