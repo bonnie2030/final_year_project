@@ -24,6 +24,14 @@ class LostAndFoundController {
         });
       }
 
+      const digitsOnlyPhone = String(phoneNumber).replace(/\D/g, '');
+      if (digitsOnlyPhone.length < 10 || digitsOnlyPhone.length > 15) {
+        return res.status(400).json({
+          success: false,
+          message: 'Phone number must contain between 10 and 15 digits'
+        });
+      }
+
       const userId = req.user ? req.user.id : null; // Optional user authentication
 
       const report = await LostAndFoundModel.create({
@@ -33,15 +41,42 @@ class LostAndFoundController {
         vehiclePlate: vehiclePlate || null
       });
 
+      let whatsappStatus = {
+        sent: false,
+        needsJoin: false,
+        error: null,
+        errorCode: null,
+        messageId: null,
+        joinInstructions: null,
+      };
+
       // Send WhatsApp confirmation to customer
       try {
-        await WhatsappService.sendLostAndFoundConfirmation(phoneNumber, {
+        const whatsappResult = await WhatsappService.sendLostAndFoundConfirmation(phoneNumber, {
           reportId: report.id,
           itemDescription: report.item_description,
           vehiclePlate: report.vehicle_plate,
         });
-        console.log('✓ Lost and found confirmation WhatsApp sent to', phoneNumber);
+
+        if (whatsappResult?.success) {
+          whatsappStatus.sent = true;
+          whatsappStatus.messageId = whatsappResult?.messageId || null;
+          console.log('✓ Lost and found confirmation WhatsApp sent to', phoneNumber);
+        } else {
+          whatsappStatus.sent = false;
+          whatsappStatus.needsJoin = Boolean(whatsappResult?.needsJoin);
+          whatsappStatus.error = whatsappResult?.error || 'Failed to send WhatsApp confirmation';
+          whatsappStatus.errorCode = whatsappResult?.code || null;
+          whatsappStatus.joinInstructions = whatsappResult?.joinInstructions || null;
+          console.warn('⚠️ Lost and found WhatsApp confirmation not sent:', {
+            phoneNumber,
+            error: whatsappStatus.error,
+            needsJoin: whatsappStatus.needsJoin,
+          });
+        }
       } catch (whatsappError) {
+        whatsappStatus.sent = false;
+        whatsappStatus.error = whatsappError.message;
         console.error('⚠️ Failed to send Lost and Found WhatsApp confirmation:', whatsappError.message);
         // Don't fail the API response - report is already created
       }
@@ -49,7 +84,8 @@ class LostAndFoundController {
       res.status(201).json({
         success: true,
         message: 'Lost item report submitted successfully',
-        data: report
+        data: report,
+        whatsapp: whatsappStatus,
       });
     } catch (error) {
       console.error('Error creating lost and found report:', error);

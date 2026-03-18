@@ -5,6 +5,7 @@ import QRCode from '@/components/QRCode';
 import { useState } from 'react';
 import { cn } from '@/lib/utils';
 import { toast } from 'sonner';
+import api from '@/lib/api';
 
 interface DigitalTicketProps {
   route: {
@@ -15,14 +16,23 @@ interface DigitalTicketProps {
     fare: number;
   };
   vehicleNumber: string;
+  paymentId?: number;
   transactionId?: string;
   paidAt?: string | Date;
   onClose: () => void;
 }
 
-const DigitalTicket = ({ route, vehicleNumber, transactionId, paidAt, onClose }: DigitalTicketProps) => {
+const WHATSAPP_TICKET_PREF_KEY = 'ticket_whatsapp_preference';
+type WhatsAppTicketPreference = 'ask' | 'always' | 'never';
+
+const DigitalTicket = ({ route, vehicleNumber, paymentId, transactionId, paidAt, onClose }: DigitalTicketProps) => {
   const [showSmsInfo, setShowSmsInfo] = useState(false);
   const [isSendingWhatsApp, setIsSendingWhatsApp] = useState(false);
+  const [showWhatsAppPrompt, setShowWhatsAppPrompt] = useState(() => {
+    if (typeof window === 'undefined') return true;
+    const pref = (localStorage.getItem(WHATSAPP_TICKET_PREF_KEY) || 'ask') as WhatsAppTicketPreference;
+    return pref !== 'never';
+  });
   
   const resolvedTransactionId = transactionId || generateTransactionId();
   const timestamp = paidAt ? new Date(paidAt) : new Date();
@@ -37,31 +47,40 @@ const DigitalTicket = ({ route, vehicleNumber, transactionId, paidAt, onClose }:
   });
 
   const handleSendToWhatsApp = async () => {
+    console.log('[DigitalTicket] handleSendToWhatsApp called with paymentId:', paymentId);
+    if (!paymentId) {
+      console.error('[DigitalTicket] Missing paymentId!', { paymentId });
+      toast.error('Missing payment reference', {
+        description: 'Unable to send via Twilio right now. Please try again from a completed payment.',
+      });
+      return;
+    }
+
     setIsSendingWhatsApp(true);
     try {
-      // Since we don't have paymentId in props, we'll construct the ticket info
-      // and potentially call an endpoint to send via WhatsApp
-      // For now, we'll show a success toast, but this could be enhanced with backend integration
+      console.log('[DigitalTicket] Calling API sendTicketWhatsApp with paymentId:', paymentId);
+      const res = await api.payments.sendTicketWhatsApp(paymentId);
+      console.log('[DigitalTicket] WhatsApp API response:', res);
+      setShowWhatsAppPrompt(false);
       
-      const ticketInfo = `
-🎫 *Your Bus Ticket*
-
-✓ Status: Confirmed
-🚌 Vehicle: ${vehicleNumber}
-📍 Route: ${route.name}
-💰 Amount: KES ${route.fare}
-⏰ Booked: ${formattedDate} at ${formattedTime}
-📋 Transaction ID: ${resolvedTransactionId}
-
-Your ticket will be printed automatically. Keep this message for reference.
-      `.trim();
-
-      // Simulate WhatsApp send (in production, this would call a backend endpoint)
-      const encodedMessage = encodeURIComponent(ticketInfo);
-      window.open(`https://wa.me/?text=${encodedMessage}`, '_blank');
+      // Check if WhatsApp needed setup (SMS instructions sent instead)
+      if (res?.needsSetup || res?.setupMethod === 'sms_sent') {
+        console.log('[DigitalTicket] WhatsApp setup needed, SMS instructions sent');
+        toast.success('WhatsApp setup required - Instructions sent via SMS!', {
+          description: res?.details || 'Follow the SMS steps to set up WhatsApp, then messages will arrive automatically.',
+          classes: {
+            toast: 'bg-gradient-to-r from-blue-600/90 to-cyan-600/90 border-blue-400/50 text-white shadow-lg',
+            title: 'text-white font-semibold',
+            description: 'text-blue-100',
+          },
+        });
+        return;
+      }
       
-      toast.success('Ticket opened in WhatsApp!', {
-        description: 'Share it with yourself or forward to your contacts',
+      toast.success('Ticket sent to WhatsApp!', {
+        description: res?.ticket_reference
+          ? `Reference: ${res.ticket_reference}`
+          : 'Sent using your configured Twilio WhatsApp account.',
         classes: {
           toast: 'bg-gradient-to-r from-emerald-600/90 to-green-600/90 border-emerald-400/50 text-white shadow-lg',
           title: 'text-white font-semibold',
@@ -69,8 +88,11 @@ Your ticket will be printed automatically. Keep this message for reference.
         },
       });
     } catch (error) {
-      console.error('Error sending to WhatsApp:', error);
-      toast.error('Could not open WhatsApp', {
+      console.error('[DigitalTicket] Error sending to WhatsApp:', error);
+      const message = error instanceof Error ? error.message : String(error);
+      console.error('[DigitalTicket] Error details:', { paymentId, message, fullError: error });
+      toast.error('Could not send ticket to WhatsApp', {
+        description: message,
         classes: {
           toast: 'bg-gradient-to-r from-rose-600/90 to-red-600/90 border-rose-400/50 text-white shadow-lg',
         },
@@ -79,6 +101,34 @@ Your ticket will be printed automatically. Keep this message for reference.
       setIsSendingWhatsApp(false);
     }
   };
+
+  const saveWhatsAppPreference = (value: WhatsAppTicketPreference) => {
+    if (typeof window === 'undefined') return;
+    localStorage.setItem(WHATSAPP_TICKET_PREF_KEY, value);
+  };
+
+  const handlePromptSendNow = () => {
+    void handleSendToWhatsApp();
+  };
+
+  const handlePromptNotNow = () => {
+    setShowWhatsAppPrompt(false);
+  };
+
+  const handlePromptAlways = () => {
+    saveWhatsAppPreference('always');
+    void handleSendToWhatsApp();
+  };
+
+  const handlePromptNever = () => {
+    saveWhatsAppPreference('never');
+    setShowWhatsAppPrompt(false);
+    toast('Preference saved', {
+      description: 'We will not ask to send tickets to WhatsApp again.',
+    });
+  };
+
+  const showPromptActions = showWhatsAppPrompt;
 
   return (
     <div className="animate-scale-in space-y-4">
@@ -147,6 +197,33 @@ Your ticket will be printed automatically. Keep this message for reference.
 
       {/* Action Buttons */}
       <div className="flex flex-col gap-2 pt-2">
+        {showPromptActions && (
+          <div className="rounded-lg border border-emerald-200 bg-emerald-50 p-3 space-y-3">
+            <p className="text-sm font-semibold text-emerald-900">Send this ticket to WhatsApp?</p>
+            <p className="text-xs text-emerald-700">You can share it to yourself or forward it to someone else.</p>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+              <Button
+                onClick={handlePromptSendNow}
+                disabled={isSendingWhatsApp}
+                className="bg-gradient-to-r from-emerald-600 to-green-600 hover:from-emerald-700 hover:to-green-700 text-white"
+              >
+                {isSendingWhatsApp ? 'Opening...' : 'Yes, Send Now'}
+              </Button>
+              <Button variant="outline" onClick={handlePromptNotNow}>
+                Not Now
+              </Button>
+            </div>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+              <Button variant="outline" onClick={handlePromptAlways} disabled={isSendingWhatsApp}>
+                Always Send Automatically
+              </Button>
+              <Button variant="outline" onClick={handlePromptNever}>
+                Never Ask Again
+              </Button>
+            </div>
+          </div>
+        )}
+
         <Button
           onClick={handleSendToWhatsApp}
           disabled={isSendingWhatsApp}

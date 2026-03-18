@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { MapContainer, TileLayer, Marker, Popup, Polyline, useMap } from 'react-leaflet';
 import L from 'leaflet';
-import 'leaflet/dist/leaflet.css';
+import LeafletAutoResize from './LeafletAutoResize';
 
 // Fix Leaflet default icon issue with Vite
 import icon from 'leaflet/dist/images/marker-icon.png';
@@ -166,8 +166,9 @@ const VehicleMap = ({
         center={mapCenter}
         zoom={mapZoom}
         style={{ height: '100%', width: '100%' }}
-        scrollWheelZoom={true}
+        scrollWheelZoom={false}
       >
+        <LeafletAutoResize watch={[mapCenter[0], mapCenter[1], mapZoom, vehicles.length]} />
         <MapUpdater center={mapCenter} zoom={mapZoom} />
         
         {/* OpenStreetMap Tile Layer */}

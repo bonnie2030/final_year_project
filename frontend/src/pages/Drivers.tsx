@@ -64,19 +64,19 @@ export default function Drivers() {
       </Helmet>
       <Header />
       <main className="container py-8 px-4">
-        <div className="flex items-center justify-between gap-4 mb-6">
-          <div>
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-6">
+          <div className="shrink-0">
             <h1 className="text-2xl font-semibold">Drivers</h1>
             <p className="text-sm text-muted-foreground">This list shows registered drivers. Contact admin for access.</p>
           </div>
-          <div className="flex items-center gap-2">
-            <Input placeholder="Search by name, email or phone" value={query} onChange={(e) => setQuery(e.target.value)} />
+          <div className="flex items-center gap-2 w-full sm:w-auto sm:max-w-xs">
+            <Input className="min-w-0" placeholder="Search by name, email or phone" value={query} onChange={(e) => setQuery(e.target.value)} />
             <Button variant="outline" onClick={() => setQuery('')}>Clear</Button>
           </div>
         </div>
 
         {loading ? (
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+          <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
             {[1,2,3,4,5,6].map((i) => (
               <div key={i} className="p-4 bg-white rounded-lg shadow-sm border">
                 <div className="flex items-center gap-4">
@@ -90,7 +90,7 @@ export default function Drivers() {
             ))}
           </div>
         ) : (
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+          <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
             {filtered.length === 0 && <div className="text-sm text-muted-foreground">No drivers found.</div>}
             {filtered.map((d) => {
               const driver = d as any;
@@ -98,37 +98,40 @@ export default function Drivers() {
 
               return (
                 <div key={driver.id} className="p-4 bg-white rounded-lg shadow-sm border">
-                  <div className="flex items-start gap-4">
-                    <Avatar>
+                  <div className="flex items-start gap-3">
+                    <Avatar className="shrink-0">
                       <AvatarImage src={resolveImageUrl(driver.profile_image)} alt={driver.name || driver.username || 'Driver'} />
                       <AvatarFallback>{initials}</AvatarFallback>
                     </Avatar>
 
-                    <div className="flex-1">
-                      <div className="flex items-center justify-between gap-4">
-                        <div>
-                          <div className="font-medium text-lg">{driver.name} <span className="text-sm text-muted-foreground">({driver.username})</span></div>
-                          <div className="text-sm text-muted-foreground mt-1">{driver.email}</div>
-                          <div className="text-sm text-muted-foreground">{driver.phone}</div>
-                        </div>
-                        <div className="text-sm text-muted-foreground">Vehicle: <span className="font-medium text-foreground">{driver.vehicle_reg || 'Not assigned'}</span></div>
+                    <div className="flex-1 min-w-0">
+                      {/* Name row */}
+                      <div className="font-medium text-base leading-tight truncate">
+                        {driver.name}{' '}
+                        <span className="text-sm text-muted-foreground font-normal">({driver.username})</span>
+                      </div>
+                      <div className="text-sm text-muted-foreground mt-0.5 truncate">{driver.email}</div>
+                      <div className="text-sm text-muted-foreground">{driver.phone}</div>
+                      {/* Vehicle below name — no longer floating right */}
+                      <div className="text-xs text-muted-foreground mt-1">
+                        Vehicle: <span className="font-medium text-foreground">{driver.vehicle_reg || 'Not assigned'}</span>
                       </div>
 
-                      <div className="mt-3 flex items-center gap-2">
+                      <div className="mt-3 flex flex-wrap items-center gap-2">
                         {driver.phone && (
-                          <a href={`tel:${driver.phone}`} className="inline-flex items-center gap-2 px-3 py-1 rounded-md bg-primary text-primary-foreground text-sm">
+                          <a href={`tel:${driver.phone}`} className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md bg-primary text-primary-foreground text-sm shrink-0">
                             <Phone className="size-4" /> Call
                           </a>
                         )}
 
                         {driver.phone && (
-                          <Button variant="outline" size="sm" onClick={() => handleCopy(driver.phone)}>
-                            <Copy className="size-4 mr-2" /> Copy
+                          <Button variant="outline" size="sm" className="shrink-0" onClick={() => handleCopy(driver.phone)}>
+                            <Copy className="size-4 mr-1.5" /> Copy
                           </Button>
                         )}
 
-                        <Button variant="ghost" size="sm" onClick={() => handleCopy(driver.email)}>
-                          <UserCheck className="size-4 mr-2" /> Contact
+                        <Button variant="ghost" size="sm" className="shrink-0" onClick={() => handleCopy(driver.email)}>
+                          <UserCheck className="size-4 mr-1.5" /> Contact
                         </Button>
                       </div>
                     </div>

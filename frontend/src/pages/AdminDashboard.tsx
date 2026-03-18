@@ -122,7 +122,10 @@ const AdminDashboard = () => {
   const { data: whatsappData } = useQuery({
     queryKey: ['admin', 'whatsapp', 'chats'],
     queryFn: async () => {
-      const res = await fetch(API_BASE + '/api/whatsapp/chats');
+      const token = localStorage.getItem('token');
+      const res = await fetch(API_BASE + '/api/whatsapp/chats', {
+        headers: token ? { Authorization: `Bearer ${token}` } : {},
+      });
       return res.json();
     },
     refetchInterval: 15000,
