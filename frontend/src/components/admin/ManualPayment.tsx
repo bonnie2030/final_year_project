@@ -31,6 +31,16 @@ interface ActiveVehicle {
   current_occupancy: number;
 }
 
+interface RouteOption {
+  id: number;
+  route_name: string;
+  fare: number;
+}
+
+type RoutesResponse = {
+  routes?: RouteOption[];
+};
+
 const ManualPayment = ({ station = '' }: ManualPaymentProps) => {
   const queryClient = useQueryClient();
   const { toast } = useToast();
@@ -49,10 +59,11 @@ const ManualPayment = ({ station = '' }: ManualPaymentProps) => {
     queryFn: api.routes.getAll,
   });
 
-  const routes: any[] = Array.isArray(routesQuery.data)
-    ? routesQuery.data
-    : Array.isArray((routesQuery.data as any)?.routes)
-      ? (routesQuery.data as any).routes
+  const routesData = routesQuery.data as RouteOption[] | RoutesResponse | undefined;
+  const routes: RouteOption[] = Array.isArray(routesData)
+    ? routesData
+    : Array.isArray(routesData?.routes)
+      ? routesData.routes
       : [];
 
   // Handle route selection - auto-fill fare and fetch active vehicle
@@ -181,8 +192,9 @@ const ManualPayment = ({ station = '' }: ManualPaymentProps) => {
           toast({ title: 'Payment failed', description: data.message || 'Could not process payment', variant: 'destructive' });
         }
       }
-    } catch (err: any) {
-      toast({ title: 'Error', description: err.message || 'Network error', variant: 'destructive' });
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : 'Network error';
+      toast({ title: 'Error', description: message, variant: 'destructive' });
     }
   };
 

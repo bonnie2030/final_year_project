@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Button } from '@/components/ui/button';
 import { useToast } from '@/hooks/use-toast';
 
@@ -77,7 +77,7 @@ export default function WhatsAppChats() {
   const [loading, setLoading] = useState(false);
   const [sourceFilter, setSourceFilter] = useState<'all' | 'payment' | 'lost_and_found'>('all');
 
-  const loadContacts = async () => {
+  const loadContacts = useCallback(async () => {
     try {
       const res = await fetch(API_BASE + '/api/whatsapp/chats', {
         headers: getAuthHeaders(),
@@ -114,9 +114,9 @@ export default function WhatsAppChats() {
     } catch (error) {
       toast({ title: 'Failed to load WhatsApp chats', variant: 'destructive' });
     }
-  };
+  }, [toast]);
 
-  const loadConversation = async (phone: string) => {
+  const loadConversation = useCallback(async (phone: string) => {
     try {
       const res = await fetch(API_BASE + `/api/whatsapp/chats/${encodeURIComponent(phone)}`, {
         headers: getAuthHeaders(),
@@ -129,17 +129,17 @@ export default function WhatsAppChats() {
     } catch (error) {
       toast({ title: 'Failed to load conversation', variant: 'destructive' });
     }
-  };
+  }, [toast]);
 
   useEffect(() => {
     loadContacts();
-  }, []);
+  }, [loadContacts]);
 
   useEffect(() => {
     if (activePhone) {
       loadConversation(activePhone);
     }
-  }, [activePhone]);
+  }, [activePhone, loadConversation]);
 
   const handleAddNumber = async () => {
     const normalized = formatPhone(phoneInput);
@@ -156,8 +156,9 @@ export default function WhatsAppChats() {
       setPhoneInput('');
       await loadContacts();
       setActivePhone(normalized);
-    } catch (error: any) {
-      toast({ title: 'Invite failed', description: error.message || 'Unable to send invite', variant: 'destructive' });
+    } catch (error: unknown) {
+      const message = error instanceof Error ? error.message : 'Unable to send invite';
+      toast({ title: 'Invite failed', description: message, variant: 'destructive' });
     } finally {
       setLoading(false);
     }
@@ -180,8 +181,9 @@ export default function WhatsAppChats() {
       } else {
         toast({ title: 'Send failed', description: data.error || 'Unable to send', variant: 'destructive' });
       }
-    } catch (error: any) {
-      toast({ title: 'Send failed', description: error.message || 'Unable to send', variant: 'destructive' });
+    } catch (error: unknown) {
+      const message = error instanceof Error ? error.message : 'Unable to send';
+      toast({ title: 'Send failed', description: message, variant: 'destructive' });
     } finally {
       setLoading(false);
     }
@@ -208,8 +210,9 @@ export default function WhatsAppChats() {
       } else {
         toast({ title: 'Delete failed', description: data.error || 'Unable to delete', variant: 'destructive' });
       }
-    } catch (error: any) {
-      toast({ title: 'Delete failed', description: error.message || 'Unable to delete', variant: 'destructive' });
+    } catch (error: unknown) {
+      const message = error instanceof Error ? error.message : 'Unable to delete';
+      toast({ title: 'Delete failed', description: message, variant: 'destructive' });
     } finally {
       setLoading(false);
     }

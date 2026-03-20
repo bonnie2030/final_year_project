@@ -64,14 +64,6 @@ class MessageModel {
     return parseInt(result.rows[0].count || 0, 10);
   }
 
-  static async markRead(messageIds = []) {
-    if (!messageIds || messageIds.length === 0) return 0;
-    const placeholders = messageIds.map((_, i) => `$${i + 1}`).join(',');
-    const query = `UPDATE messages SET is_read = true WHERE id IN (${placeholders}) RETURNING *;`;
-    const result = await pool.query(query, messageIds);
-    return result.rows;
-  }
-
   static async markReadForReceiver(messageIds = [], receiverId) {
     if (!messageIds || messageIds.length === 0 || !receiverId) return [];
     const placeholders = messageIds.map((_, i) => `$${i + 2}`).join(',');

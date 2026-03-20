@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -30,7 +30,6 @@ interface Route {
 
 export default function VehicleManager() {
   const { toast } = useToast();
-  console.log('[VehicleManager] Component loaded successfully');
   const [vehicles, setVehicles] = useState<Vehicle[]>([]);
   const [routes, setRoutes] = useState<Route[]>([]);
   const [loading, setLoading] = useState(false);
@@ -45,12 +44,12 @@ export default function VehicleManager() {
     route_id: '',
   });
 
-  const getAuthHeaders = () => {
+  const getAuthHeaders = useCallback(() => {
     const token = localStorage.getItem('token');
     return token ? { Authorization: `Bearer ${token}` } : {};
-  };
+  }, []);
 
-  const fetchVehicles = async () => {
+  const fetchVehicles = useCallback(async () => {
     try {
       const res = await fetch(API_BASE + '/api/vehicles', {
         headers: getAuthHeaders(),
@@ -58,7 +57,6 @@ export default function VehicleManager() {
       const data = await res.json();
       if (res.ok) {
         setVehicles(Array.isArray(data.vehicles) ? data.vehicles : Array.isArray(data) ? data : []);
-        console.log('Vehicles loaded:', data.vehicles?.length || data?.length || 0);
       } else {
         console.error('Failed to fetch vehicles:', data);
         toast({ title: 'Failed to load vehicles', description: data.message || 'Error', variant: 'destructive' });
@@ -67,9 +65,9 @@ export default function VehicleManager() {
       console.error('Error fetching vehicles:', err);
       toast({ title: 'Error loading vehicles', description: 'Please check console for details', variant: 'destructive' });
     }
-  };
+  }, [getAuthHeaders, toast]);
 
-  const fetchRoutes = async () => {
+  const fetchRoutes = useCallback(async () => {
     try {
       const res = await fetch(API_BASE + '/api/routes', {
         headers: getAuthHeaders(),
@@ -78,17 +76,16 @@ export default function VehicleManager() {
       if (res.ok) {
         const routesList = Array.isArray(data.routes) ? data.routes : Array.isArray(data) ? data : [];
         setRoutes(routesList);
-        console.log('Routes loaded:', routesList.length);
       }
     } catch (err) {
       console.error('Error fetching routes:', err);
     }
-  };
+  }, [getAuthHeaders]);
 
   useEffect(() => {
     setLoading(true);
     Promise.all([fetchVehicles(), fetchRoutes()]).finally(() => setLoading(false));
-  }, []);
+  }, [fetchVehicles, fetchRoutes]);
 
   const handleCreate = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -136,8 +133,9 @@ export default function VehicleManager() {
       } else {
         toast({ title: 'Create failed', description: data.message || 'Error creating vehicle', variant: 'destructive' });
       }
-    } catch (err: any) {
-      toast({ title: 'Create failed', description: err.message || 'Error', variant: 'destructive' });
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : 'Error';
+      toast({ title: 'Create failed', description: message, variant: 'destructive' });
     } finally {
       setLoading(false);
     }
@@ -159,8 +157,9 @@ export default function VehicleManager() {
       } else {
         toast({ title: 'Delete failed', variant: 'destructive' });
       }
-    } catch (err: any) {
-      toast({ title: 'Delete failed', description: err.message, variant: 'destructive' });
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : 'Error';
+      toast({ title: 'Delete failed', description: message, variant: 'destructive' });
     } finally {
       setLoading(false);
     }

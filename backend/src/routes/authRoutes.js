@@ -23,6 +23,8 @@ router.post('/register', authLimiter, AuthController.register);
 router.post('/login', authLimiter, AuthController.login);
 // Demo admin login (returns JWT for demo admin)
 router.post('/demo_login', authLimiter, AuthController.demoLogin);
+// Demo driver login (returns JWT for demo driver)
+router.post('/demo_driver_login', authLimiter, AuthController.demoDriverLogin);
 
 // Protected routes
 router.get('/profile', authMiddleware, AuthController.getProfile);

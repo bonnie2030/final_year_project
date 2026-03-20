@@ -1,3 +1,4 @@
+// Final express error boundary. Keep payload shape stable for frontend handling.
 const errorMiddleware = (err, req, res, next) => {
   console.error('Error:', err);
 

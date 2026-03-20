@@ -1,6 +1,7 @@
 const VehicleModel = require('../models/vehicleModel');
 
 class VehicleController {
+  // List active vehicles with route metadata for admin and booking flows.
   static async getAll(req, res) {
     try {
       const vehicles = await VehicleModel.getAllVehicles();
@@ -32,6 +33,7 @@ class VehicleController {
     }
   }
 
+  // Create supports both snake_case and camelCase payloads for frontend compatibility.
   static async create(req, res) {
     try {
       const { registration_number, registrationNumber, vehicle_type, vehicleType, color, make, model, year, route_id, routeId, capacity, user_id, userId } = req.body;
@@ -77,6 +79,7 @@ class VehicleController {
     }
   }
 
+  // Soft-delete (set inactive) to preserve historical references in payments/reports.
   static async remove(req, res) {
     try {
       const deleted = await VehicleModel.deleteVehicle(req.params.id);

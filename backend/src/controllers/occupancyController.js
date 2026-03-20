@@ -3,7 +3,7 @@ const VehicleModel = require('../models/vehicleModel');
 const RouteModel = require('../models/routeModel');
 
 class OccupancyController {
-  // Update vehicle occupancy status (FR3: driver interface to mark "Seats Available" or "Full")
+  // Driver-side toggle between coarse occupancy states: available/full.
   static async updateOccupancyStatus(req, res) {
     try {
       const userId = req.userId;
@@ -23,7 +23,7 @@ class OccupancyController {
         });
       }
 
-      // Verify vehicle belongs to user (driver)
+      // Validate target vehicle exists before applying status update.
       const vehicle = await VehicleModel.getVehicleById(vehicleId);
       if (!vehicle) {
         return res.status(404).json({ message: 'Vehicle not found' });
@@ -67,7 +67,7 @@ class OccupancyController {
     }
   }
 
-  // Public: update numeric occupancy for a vehicle (used by frontend PUT /api/occupancy/:vehicleId)
+  // Admin-side numeric occupancy override endpoint.
   static async updateOccupancyCount(req, res) {
     try {
       const { vehicleId } = req.params;

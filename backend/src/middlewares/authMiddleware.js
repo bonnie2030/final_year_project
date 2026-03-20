@@ -1,6 +1,8 @@
 const jwt = require('jsonwebtoken');
 const SessionModel = require('../models/sessionModel');
 
+// Validates JWT and enriches the request with caller identity.
+// Driver sessions are single-device; admin/user sessions are currently multi-device.
 const authMiddleware = async (req, res, next) => {
   try {
     // Get token from header
@@ -25,7 +27,7 @@ const authMiddleware = async (req, res, next) => {
       }
     }
 
-    // Update last activity (for drivers tracking)
+    // Keep heartbeat fresh for driver session invalidation and activity analytics.
     if (decoded.role === 'driver') {
       await SessionModel.updateLastActivity(token);
     }
@@ -35,6 +37,11 @@ const authMiddleware = async (req, res, next) => {
     req.userEmail = decoded.email;
     req.userRole = decoded.role;
     req.token = token;
+    req.user = {
+      id: decoded.id,
+      email: decoded.email,
+      role: decoded.role,
+    };
 
     next();
   } catch (error) {
@@ -54,7 +61,7 @@ const authMiddleware = async (req, res, next) => {
 
 const authorizeRoles = (allowedRoles) => (req, res, next) => {
   try {
-    // Convert single role string to array
+    // Accept either a single role or an array for ergonomic route definitions.
     const roles = Array.isArray(allowedRoles) ? allowedRoles : [allowedRoles];
 
     if (!roles.includes(req.userRole)) {

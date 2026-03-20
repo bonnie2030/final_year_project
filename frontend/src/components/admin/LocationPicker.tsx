@@ -13,7 +13,7 @@ import { Label } from "@/components/ui/label";
 import { useToast } from "@/hooks/use-toast";
 import LeafletAutoResize from "@/components/Map/LeafletAutoResize";
 
-delete (L.Icon.Default.prototype as any)._getIconUrl;
+delete (L.Icon.Default.prototype as unknown as { _getIconUrl?: unknown })._getIconUrl;
 L.Icon.Default.mergeOptions({
   iconRetinaUrl:
     "https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.7.1/images/marker-icon-2x.png",
@@ -38,6 +38,13 @@ interface SearchResult {
   lon: number;
   display_name: string;
 }
+
+type NominatimResult = {
+  name?: string;
+  lat: string;
+  lon: string;
+  display_name: string;
+};
 
 function MapClickHandler({
   onMapClick,
@@ -105,8 +112,8 @@ const LocationPicker = ({
 
       if (!response.ok) throw new Error("Search failed");
 
-      const results = await response.json();
-      const formatted: SearchResult[] = results.map((result: any) => ({
+      const results: NominatimResult[] = await response.json();
+      const formatted: SearchResult[] = results.map((result) => ({
         name:
           result.name ||
           result.display_name.split(",")[0] ||

@@ -6,7 +6,7 @@ const router = express.Router();
 const adminOnly = [authMiddleware, authorizeRoles(['admin'])];
 
 // Database health check
-router.get('/health/db', AdminController.checkDatabaseHealth);
+router.get('/health/db', adminOnly, AdminController.checkDatabaseHealth);
 
 // FR5: Admin Dashboard Overview
 router.get('/dashboard', adminOnly, AdminController.getDashboardOverview);

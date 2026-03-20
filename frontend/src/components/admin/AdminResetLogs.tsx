@@ -1,12 +1,22 @@
-import React, { useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
 import { Button } from '@/components/ui/button';
 import { useToast } from '@/hooks/use-toast';
 
 const API_BASE = import.meta.env.VITE_API_URL || '';
 
+type ResetLog = {
+  id: number;
+  action_type: string;
+  created_at: string;
+  user_name?: string;
+  user_email?: string;
+  resource_id?: number;
+  details?: string;
+};
+
 export default function AdminResetLogs({ onClose }: { onClose?: () => void }) {
   const { toast } = useToast();
-  const [logs, setLogs] = useState<any[]>([]);
+  const [logs, setLogs] = useState<ResetLog[]>([]);
   const [loading, setLoading] = useState(false);
 
   const getAuthHeaders = () => {
@@ -14,31 +24,33 @@ export default function AdminResetLogs({ onClose }: { onClose?: () => void }) {
     return token ? { Authorization: `Bearer ${token}` } : {};
   };
 
-  const fetchLogs = async () => {
+  const fetchLogs = useCallback(async () => {
     setLoading(true);
     try {
+      // Reset logs are admin audit entries from activity logs.
       const res = await fetch(API_BASE + '/api/drivers/resets?limit=100', { headers: { ...getAuthHeaders() } });
       const data = await res.json();
       if (res.ok) setLogs(data.activities || data.rows || []);
       else toast({ title: 'Failed to load logs', description: data.message || 'Error', variant: 'destructive' });
-    } catch (err: any) {
-      toast({ title: 'Failed to load logs', description: err.message || 'Error', variant: 'destructive' });
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : 'Error';
+      toast({ title: 'Failed to load logs', description: message, variant: 'destructive' });
     } finally { setLoading(false); }
-  };
+  }, [toast]);
 
-  useEffect(() => { fetchLogs(); }, []);
+  useEffect(() => { fetchLogs(); }, [fetchLogs]);
 
   return (
     <div>
       <div className="mb-3">
         <Button variant="outline" size="sm" onClick={fetchLogs}>Refresh</Button>
-        <Button variant="ghost" size="sm" onClick={() => { try { navigator.clipboard.writeText(JSON.stringify(logs, null, 2)); toast({ title: 'Copied logs' }); } catch (e) { toast({ title: 'Copy failed' }); } }} className="ml-2">Copy JSON</Button>
+        <Button variant="ghost" size="sm" onClick={() => { try { navigator.clipboard.writeText(JSON.stringify(logs, null, 2)); toast({ title: 'Copied logs' }); } catch (e) { console.warn('Failed to copy logs JSON', e); toast({ title: 'Copy failed' }); } }} className="ml-2">Copy JSON</Button>
       </div>
 
       <div className="space-y-2 max-h-80 overflow-auto">
         {loading && <div>Loading…</div>}
         {!loading && logs.length === 0 && <div className="text-sm text-muted-foreground">No reset logs found.</div>}
-        {logs.map((l: any) => (
+        {logs.map((l) => (
           <div key={l.id} className="p-2 rounded border">
             <div className="text-sm font-semibold">{l.action_type} — {new Date(l.created_at).toLocaleString()}</div>
             <div className="text-xs text-muted-foreground">Admin: {l.user_name || l.user_email || 'unknown'} • Driver id: {l.resource_id}</div>

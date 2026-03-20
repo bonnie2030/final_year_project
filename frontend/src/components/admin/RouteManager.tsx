@@ -45,15 +45,18 @@ const RouteManager = ({ station = '' }: { station?: string }) => {
   const routes: RouteRecord[] = useMemo(() => {
     const raw = Array.isArray(routesQuery.data)
       ? routesQuery.data
-      : Array.isArray((routesQuery.data as any)?.routes)
-        ? (routesQuery.data as any).routes
+      : Array.isArray((routesQuery.data as { routes?: unknown[] } | undefined)?.routes)
+        ? ((routesQuery.data as { routes?: unknown[] }).routes || [])
         : [];
 
     return raw
-      .map((r: any) => ({
-        ...r,
-        id: Number(r.id ?? r.route_id ?? r.routeId ?? 0),
-      }))
+      .map((r: unknown) => {
+        const route = r as Partial<RouteRecord> & { route_id?: number; routeId?: number };
+        return {
+          ...route,
+          id: Number(route.id ?? route.route_id ?? route.routeId ?? 0),
+        };
+      })
       .filter((r: RouteRecord) => Number.isFinite(r.id) && r.status !== "inactive")
       .filter((r: RouteRecord) =>
         !station || r.start_location === station || r.end_location === station
@@ -61,16 +64,17 @@ const RouteManager = ({ station = '' }: { station?: string }) => {
   }, [routesQuery.data, station]);
 
   const createRoute = useMutation({
-    mutationFn: (payload: any) => api.routes.create(payload),
+    mutationFn: (payload: Record<string, unknown>) => api.routes.create(payload),
     onSuccess: () => {
       setForm(initialForm);
       queryClient.invalidateQueries({ queryKey: ["routes"] });
       toast({ title: "Route created successfully!" });
     },
-    onError: (err: any) => {
+    onError: (err: unknown) => {
+      const message = err instanceof Error ? err.message : 'Error';
       toast({
         title: "Failed to create route",
-        description: err.message,
+        description: message,
         variant: "destructive",
       });
     },
@@ -82,10 +86,11 @@ const RouteManager = ({ station = '' }: { station?: string }) => {
       queryClient.invalidateQueries({ queryKey: ["routes"] });
       toast({ title: "Route deleted" });
     },
-    onError: (err: any) => {
+    onError: (err: unknown) => {
+      const message = err instanceof Error ? err.message : 'Error';
       toast({
         title: "Failed to delete route",
-        description: err.message,
+        description: message,
         variant: "destructive",
       });
     },
@@ -130,7 +135,7 @@ const RouteManager = ({ station = '' }: { station?: string }) => {
       end_longitude: form.end_longitude,
     };
 
-    console.log('[RouteManager] Submitting payload:', payload);
+    // Mutation handles server validation and toast feedback.
     createRoute.mutate(payload);
   };
 

@@ -4,6 +4,7 @@ const ActivityLogModel = require('../models/activityLogModel');
 const VehicleModel = require('../models/vehicleModel');
 
 class DriverController {
+  // Resolves the driver's currently assigned vehicle and best matching active trip.
   static async getAssignedDriverAndTrip(userId) {
     const driver = await DriverModel.getDriverByUserId(userId);
     if (!driver || !driver.assigned_vehicle_id) {
@@ -77,7 +78,6 @@ class DriverController {
   static async createDriver(req, res) {
     try {
       let { name, email, phone, password, driving_license, assigned_vehicle_id, documents } = req.body;
-      console.log('Create driver payload:', { name, email, phone, password: password ? '[REDACTED]' : undefined, driving_license, assigned_vehicle_id });
       if (!name || !email || !password) {
         return res.status(400).json({ message: 'Missing required fields: name, email, password' });
       }
@@ -87,17 +87,22 @@ class DriverController {
       if (assigned_vehicle_id != null) {
         const parsed = parseInt(assigned_vehicle_id, 10);
         assigned_vehicle_id = Number.isNaN(parsed) ? null : parsed;
-      }
 
-      console.log('Creating driver with vehicle assignment:', assigned_vehicle_id);
+        if (assigned_vehicle_id) {
+          const existingAssignment = await DriverModel.getDriverByVehicleId(assigned_vehicle_id);
+          if (existingAssignment) {
+            return res.status(409).json({
+              message: `Vehicle is already assigned to ${existingAssignment.username || existingAssignment.name || 'another driver'}`,
+            });
+          }
+        }
+      }
 
       // Create user with driver role and generated username
       const user = await UserModel.createDriverUser({ name, email, phone, password });
 
       // Create driver record
       const driver = await DriverModel.createDriver({ userId: user.id, drivingLicense: driving_license, assignedVehicleId: assigned_vehicle_id, documents });
-
-      console.log('Driver created:', { userId: user.id, driverId: driver.id, assignedVehicleId: driver.assigned_vehicle_id });
 
       // Log driver creation action
       try {
@@ -118,6 +123,7 @@ class DriverController {
         if (/phone/.test(detail) || /users_phone_key/.test(error.constraint || '')) field = 'phone';
         if (/email/.test(detail) || /users_email_key/.test(error.constraint || '')) field = 'email';
         if (/username/.test(detail) || /users_username_key/.test(error.constraint || '')) field = 'username';
+        if (/assigned_vehicle_id/.test(detail) || /drivers_assigned_vehicle_unique_idx/.test(error.constraint || '')) field = 'assigned vehicle';
         return res.status(409).json({ message: `${field} already exists`, error: detail || error.message });
       }
 
@@ -415,10 +421,22 @@ class DriverController {
     try {
       const { userId, vehicleId } = req.body;
       if (!userId || !vehicleId) return res.status(400).json({ message: 'Missing userId or vehicleId' });
+
+      // Application-level check for friendlier error messaging before DB constraint enforcement.
+      const existingAssignment = await DriverModel.getDriverByVehicleId(vehicleId);
+      if (existingAssignment && Number(existingAssignment.user_id) !== Number(userId)) {
+        return res.status(409).json({
+          message: `Vehicle is already assigned to ${existingAssignment.username || existingAssignment.name || 'another driver'}`,
+        });
+      }
+
       const updated = await DriverModel.assignVehicle(userId, vehicleId);
       res.json({ message: 'Vehicle assigned', driver: updated });
     } catch (error) {
       console.error('Assign vehicle error:', error.message);
+      if (error && error.code === '23505' && /drivers_assigned_vehicle_unique_idx|assigned_vehicle_id/i.test(error.constraint || error.detail || '')) {
+        return res.status(409).json({ message: 'Vehicle is already assigned to another driver' });
+      }
       res.status(500).json({ message: 'Failed to assign vehicle', error: error.message });
     }
   }
@@ -430,16 +448,12 @@ class DriverController {
 
       let { name, phone, driving_license, assigned_vehicle_id } = req.body;
 
-      console.log('Update driver request:', { userId, name, phone, driving_license, assigned_vehicle_id });
-
       // sanitize assigned vehicle id
       if (assigned_vehicle_id === '' || assigned_vehicle_id === undefined) assigned_vehicle_id = null;
       if (assigned_vehicle_id != null) {
         const parsed = parseInt(assigned_vehicle_id, 10);
         assigned_vehicle_id = Number.isNaN(parsed) ? null : parsed;
       }
-
-      console.log('Sanitized assigned_vehicle_id:', assigned_vehicle_id);
 
       // Update user basic info
       let updatedUser = null;
@@ -452,13 +466,23 @@ class DriverController {
       if (driving_license !== undefined) driverUpdate.drivingLicense = driving_license;
       if (assigned_vehicle_id !== undefined) driverUpdate.assignedVehicleId = assigned_vehicle_id;
 
-      const updatedDriver = await DriverModel.updateDriver(userId, driverUpdate);
+      if (assigned_vehicle_id) {
+        const existingAssignment = await DriverModel.getDriverByVehicleId(assigned_vehicle_id);
+        if (existingAssignment && Number(existingAssignment.user_id) !== Number(userId)) {
+          return res.status(409).json({
+            message: `Vehicle is already assigned to ${existingAssignment.username || existingAssignment.name || 'another driver'}`,
+          });
+        }
+      }
 
-      console.log('Driver updated:', updatedDriver);
+      const updatedDriver = await DriverModel.updateDriver(userId, driverUpdate);
 
       res.json({ message: 'Driver updated', user: updatedUser, driver: updatedDriver });
     } catch (error) {
       console.error('Update driver error:', error.message);
+      if (error && error.code === '23505' && /drivers_assigned_vehicle_unique_idx|assigned_vehicle_id/i.test(error.constraint || error.detail || '')) {
+        return res.status(409).json({ message: 'Vehicle is already assigned to another driver' });
+      }
       res.status(500).json({ message: 'Failed to update driver', error: error.message });
     }
   }
@@ -499,18 +523,23 @@ class DriverController {
     }
   }
 
-  // Reset driver's password (admin action) - generate a temporary password and set it
+  // Reset driver's password; supports admin-supplied password or generated temporary password.
   static async resetPassword(req, res) {
     try {
       const userId = parseInt(req.params.userId, 10);
       if (!userId) return res.status(400).json({ message: 'Invalid userId' });
+
+      const providedPassword = typeof req.body?.newPassword === 'string' ? req.body.newPassword.trim() : '';
+      if (providedPassword && providedPassword.length < 8) {
+        return res.status(400).json({ message: 'Manual password must be at least 8 characters' });
+      }
 
       // ensure driver exists
       const driver = await DriverModel.getDriverByUserId(userId);
       if (!driver) return res.status(404).json({ message: 'Driver not found' });
 
       // Generate a temporary password
-      const tempPass = 'Drv@' + Math.random().toString(36).slice(2, 10);
+      const tempPass = providedPassword || ('Drv@' + Math.random().toString(36).slice(2, 10));
 
       // Update password via UserModel
       await UserModel.changePassword(userId, tempPass);
@@ -518,12 +547,19 @@ class DriverController {
       // Log the reset activity (do not store the full password)
       try {
         const masked = '****' + String(tempPass).slice(-2);
-        await ActivityLogModel.logActivity(req.userId || null, 'driver_password_reset', 'driver', userId, JSON.stringify({ masked }), req.ip || null);
+        await ActivityLogModel.logActivity(
+          req.userId || null,
+          'driver_password_reset',
+          'driver',
+          userId,
+          JSON.stringify({ masked, mode: providedPassword ? 'manual' : 'generated' }),
+          req.ip || null
+        );
       } catch (logErr) {
         console.error('Failed to log password reset activity:', logErr);
       }
 
-      res.json({ message: 'Password reset', password: tempPass });
+      res.json({ message: 'Password reset', password: tempPass, mode: providedPassword ? 'manual' : 'generated' });
     } catch (error) {
       console.error('Reset password error:', error.message);
       res.status(500).json({ message: 'Failed to reset password', error: error.message });
@@ -536,28 +572,16 @@ class DriverController {
       const userId = req.userId;
       const driver = await DriverModel.getDriverByUserId(userId);
       
-      console.log('Fetching tickets for driver userId:', userId, 'vehicle_id:', driver?.assigned_vehicle_id);
-      
       if (!driver) {
         return res.status(404).json({ message: 'Driver not found' });
       }
       
       if (!driver.assigned_vehicle_id) {
-        console.log('Driver has no assigned vehicle');
         return res.json({ message: 'No vehicle assigned', tickets: [] });
       }
 
       // Fetch all completed payments for this vehicle
       const pool = require('../config/database');
-      
-      // Debug: Check total completed payments
-      const debugQuery = `SELECT COUNT(*) as total FROM payments WHERE status = 'completed'`;
-      const debugResult = await pool.query(debugQuery);
-      console.log('Total completed payments in database:', debugResult.rows[0]?.total);
-      
-      const debugVehicleQuery = `SELECT COUNT(*) as total FROM payments WHERE vehicle_id IS NOT NULL AND status = 'completed'`;
-      const debugVehicleResult = await pool.query(debugVehicleQuery);
-      console.log('Completed payments with vehicle_id:', debugVehicleResult.rows[0]?.total);
       
       const query = `
         SELECT p.*, r.route_name, v.registration_number as vehicle_number
@@ -572,13 +596,9 @@ class DriverController {
         ORDER BY p.created_at DESC
         LIMIT 100
       `;
-      
-      console.log('Executing query for vehicle_id:', driver.assigned_vehicle_id);
-      
+
       const result = await pool.query(query, [driver.assigned_vehicle_id, driver.vehicle_reg || '']);
-      
-      console.log('Found', result.rows.length, 'tickets for vehicle', driver.assigned_vehicle_id);
-      
+
       res.json({ 
         message: 'Vehicle tickets fetched',
         tickets: result.rows,
@@ -628,7 +648,7 @@ class DriverController {
       const PaymentModel = require('../models/paymentModel');
       
       // Create payment record
-      const transactionId = `DRV-${Date.now()}-${Math.random().toString(36).substr(2, 9).toUpperCase()}`;
+      const transactionId = `DRV-${Date.now()}-${Math.random().toString(36).slice(2, 11).toUpperCase()}`;
       const pool = require('../config/database');
       
       const insertQuery = `

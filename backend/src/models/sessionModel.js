@@ -3,6 +3,7 @@ const pool = require('../config/database');
 class SessionModel {
   static async createTable() {
     try {
+      // Session table is role-agnostic; policy decisions are enforced in saveSession/auth middleware.
       const createTableQuery = `
         CREATE TABLE IF NOT EXISTS user_sessions (
           id SERIAL PRIMARY KEY,
@@ -49,7 +50,7 @@ class SessionModel {
         );
       }
 
-      // Create new session
+      // Always insert a fresh token row so historical session/audit data is preserved.
       const query = `
         INSERT INTO user_sessions (user_id, token, device_info, ip_address, expires_at, is_active)
         VALUES ($1, $2, $3, $4, $5, TRUE)

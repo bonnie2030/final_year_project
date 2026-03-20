@@ -2,7 +2,6 @@ const FeedbackModel = require('../models/feedbackModel');
 const SmsService = require('../services/smsService');
 const WhatsappService = require('../services/whatsappService');
 const NTSAService = require('../services/ntsaService');
-const UserModel = require('../models/userModel');
 const pool = require('../config/database');
 
 class FeedbackController {
@@ -32,14 +31,7 @@ class FeedbackController {
       } = req.body;
 
       // Validate required fields
-      console.log('[FEEDBACK API] Validating fields...');
       if (!routeId || !vehicleId || !feedbackType || !comment) {
-        console.error('[FEEDBACK API] Validation failed - Missing fields:', {
-          routeId: !!routeId,
-          vehicleId: !!vehicleId,
-          feedbackType: !!feedbackType,
-          comment: !!comment,
-        });
         return res.status(400).json({
           success: false,
           message: 'Missing required fields: routeId, vehicleId, feedbackType, comment',
@@ -49,7 +41,6 @@ class FeedbackController {
 
       // Validate feedback type
       if (!['Complaint', 'Compliment'].includes(feedbackType)) {
-        console.error('[FEEDBACK API] Invalid feedback type:', feedbackType);
         return res.status(400).json({
           success: false,
           message: 'Feedback type must be either "Complaint" or "Compliment"'
@@ -183,10 +174,7 @@ class FeedbackController {
       });
 
     } catch (error) {
-      console.error('[FEEDBACK API] ✗ ERROR:', error.message);
-      console.error('[FEEDBACK API] Stack:', error.stack);
-      console.error('[FEEDBACK API] Code:', error.code);
-      console.log('[FEEDBACK API] Duration:', Date.now() - startTime, 'ms');
+      console.error('Submit feedback error:', error.message);
 
       res.status(500).json({
         success: false,
@@ -222,7 +210,6 @@ class FeedbackController {
 
   // Public: list feedback (for dashboard)
   static async getAllPublic(req, res) {
-    console.log('[FEEDBACK API] GET /api/feedback - Fetching all feedback');
     try {
       const query = `
         SELECT 
@@ -235,7 +222,6 @@ class FeedbackController {
       `;
 
       const result = await pool.query(query);
-      console.log('[FEEDBACK API] ✓ Fetched', result.rows.length, 'feedback items');
 
       res.json({
         success: true,
@@ -244,7 +230,7 @@ class FeedbackController {
         feedback: result.rows
       });
     } catch (error) {
-      console.error('[FEEDBACK API] Error fetching feedback:', error.message);
+      console.error('Error fetching feedback:', error.message);
       res.status(500).json({
         success: false,
         message: 'Failed to fetch feedback',
@@ -259,7 +245,6 @@ class FeedbackController {
    */
   static async getFeedbackById(req, res) {
     const { feedbackId } = req.params;
-    console.log('[FEEDBACK API] GET /api/feedback/:id -', feedbackId);
 
     try {
       const query = 'SELECT * FROM feedback WHERE id = $1;';
@@ -277,7 +262,7 @@ class FeedbackController {
         feedback: result.rows[0]
       });
     } catch (error) {
-      console.error('[FEEDBACK API] Error fetching feedback:', error.message);
+      console.error('Error fetching feedback by id:', error.message);
       res.status(500).json({
         success: false,
         message: 'Failed to fetch feedback',
@@ -292,7 +277,6 @@ class FeedbackController {
    */
   static async deleteFeedback(req, res) {
     const { feedbackId } = req.params;
-    console.log('[FEEDBACK API] DELETE /api/feedback/:id -', feedbackId);
 
     try {
       const query = 'DELETE FROM feedback WHERE id = $1 RETURNING id;';
@@ -311,7 +295,7 @@ class FeedbackController {
         id: result.rows[0].id
       });
     } catch (error) {
-      console.error('[FEEDBACK API] Error deleting feedback:', error.message);
+      console.error('Error deleting feedback:', error.message);
       res.status(500).json({
         success: false,
         message: 'Failed to delete feedback',
@@ -364,120 +348,6 @@ class FeedbackController {
 
       const feedback = await FeedbackModel.getFeedbackById(feedbackId);
 
-      if (!feedback) {
-        return res.status(404).json({ message: 'Feedback not found' });
-      }
-
-      const classification = NTSAService.classifyComplaint({
-        comment: feedback.comment,
-        complaintType: feedback.report_type,
-        vehicleNumber: feedback.vehicle_registration,
-        routeName: feedback.route_name,
-        ntsaPriority: feedback.ntsa_priority,
-        ntsaCategory: feedback.ntsa_category,
-      });
-
-      const result = await NTSAService.forwardToNTSA(
-        {
-          complaintType: feedback.report_type,
-          comment: feedback.comment + (additionalInfo ? '\n\nAdmin Notes: ' + additionalInfo : ''),
-          vehicleNumber: feedback.vehicle_registration,
-          routeName: feedback.route_name,
-          saccoName: feedback.sacco_name,
-          crewDetails: feedback.crew_details,
-          incidentDate: feedback.incident_date,
-          incidentTime: feedback.incident_time,
-          evidence: feedback.evidence,
-          reason,
-        },
-        classification
-      );
-
-      if (result.success) {
-        await FeedbackModel.updateNTSAForwarded(feedbackId, true);
-        console.log('✓ Feedback forwarded to NTSA:', {
-          feedbackId,
-          messageId: result.messageId,
-        });
-      }
-
-      res.json({
-        message: 'Forward to NTSA processed',
-        classification,
-        result,
-      });
-    } catch (error) {
-      console.error('Forward to NTSA error:', error);
-      res.status(500).json({ message: 'Failed to forward to NTSA', error: error.message });
-    }
-  }
-
-  // Admin: Send WhatsApp feedback summary to customers
-  static async sendFeedbackWhatsApp(req, res) {
-    try {
-      const { feedbackId, phoneNumber } = req.params;
-
-      const feedback = await FeedbackModel.getFeedbackById(feedbackId);
-      if (!feedback) {
-        return res.status(404).json({ message: 'Feedback not found' });
-      }
-
-      await FeedbackModel.deleteFeedback(feedbackId);
-
-      res.json({
-        success: true,
-        message: 'Feedback deleted successfully',
-        id: result.rows[0].id
-      });
-    } catch (error) {
-      console.error('Send feedback WhatsApp error:', error);
-      res.status(500).json({ message: 'Failed to send WhatsApp', error: error.message });
-    }
-  }
-
-  // Admin: Get NTSA classification statistics
-  static async getNTSAStats(req, res) {
-    try {
-      const feedback = await FeedbackModel.getAllFeedback(1000, 0, {});
-      const complaints = feedback.filter(f => f.feedback_type === 'Complaint');
-
-      const summary = NTSAService.getClassificationSummary(
-        complaints.map(c => ({
-          complaintType: c.report_type,
-          comment: c.comment,
-          vehicleNumber: c.vehicle_registration,
-          routeName: c.route_name,
-          ntsaPriority: c.ntsa_priority,
-          ntsaCategory: c.ntsa_category,
-        }))
-      );
-
-      res.json({
-        message: 'NTSA statistics fetched',
-        stats: summary,
-        criticalComplaints: feedback.filter(f => {
-          const classification = NTSAService.classifyComplaint({
-            comment: f.comment,
-            complaintType: f.report_type,
-            ntsaPriority: f.ntsa_priority,
-            ntsaCategory: f.ntsa_category,
-          });
-          return classification.priority === 'CRITICAL';
-        }),
-      });
-    } catch (error) {
-      console.error('Get NTSA stats error:', error);
-      res.status(500).json({ message: 'Failed to fetch NTSA stats', error: error.message });
-    }
-  }
-
-  // Admin: Forward specific feedback to NTSA
-  static async forwardToNTSA(req, res) {
-    try {
-      const { feedbackId } = req.params;
-      const { reason, additionalInfo } = req.body;
-
-      const feedback = await FeedbackModel.getFeedbackById(feedbackId);
       if (!feedback) {
         return res.status(404).json({ message: 'Feedback not found' });
       }

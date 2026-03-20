@@ -27,7 +27,8 @@ const upload = multer({
 router.get('/', FeedbackController.getAllPublic);
 router.post('/', FeedbackController.submitFeedback);
 router.post('/evidence', upload.array('files', 5), FeedbackController.uploadEvidence);
-router.get('/:feedbackId', FeedbackController.getFeedbackById);
+// Constrain this route to numeric IDs so /admin/* endpoints are not shadowed.
+router.get('/:feedbackId(\\d+)', FeedbackController.getFeedbackById);
 
 // Protected routes
 router.use(authMiddleware);

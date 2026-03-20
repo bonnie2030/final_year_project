@@ -7,6 +7,7 @@ const { authMiddleware } = require('../middlewares/authMiddleware');
 
 const router = express.Router();
 
+// Inline admin guard keeps this route file self-contained without extra dependencies.
 const adminOnly = (req, res, next) => {
   if (req.userRole !== 'admin') return res.status(403).json({ message: 'Admin only' });
   next();
@@ -39,12 +40,12 @@ const upload = multer({
 router.get('/public', DriverController.listDriversPublic);
 
 // Admin creates a driver
-router.post('/', authMiddleware, DriverController.createDriver);
-router.get('/', authMiddleware, DriverController.listDrivers);
-router.post('/assign', authMiddleware, DriverController.assignVehicle);
+router.post('/', authMiddleware, adminOnly, DriverController.createDriver);
+router.get('/', authMiddleware, adminOnly, DriverController.listDrivers);
+router.post('/assign', authMiddleware, adminOnly, DriverController.assignVehicle);
 // Update or delete specific driver (by user id)
-router.put('/:userId', authMiddleware, DriverController.updateDriver);
-router.delete('/:userId', authMiddleware, DriverController.deleteDriver);
+router.put('/:userId', authMiddleware, adminOnly, DriverController.updateDriver);
+router.delete('/:userId', authMiddleware, adminOnly, DriverController.deleteDriver);
 router.post('/:userId/photo', authMiddleware, adminOnly, upload.single('photo'), DriverController.uploadDriverPhoto);
 // Reset password (admin action) - admin only
 router.post('/:userId/reset_password', authMiddleware, adminOnly, DriverController.resetPassword);
