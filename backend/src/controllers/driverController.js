@@ -655,16 +655,23 @@ class DriverController {
 
       // Increment occupancy
       let updatedTrip = null;
-      let occupancy = null;
 
       if (trip) {
         const TripModel = require('../models/tripModel');
         updatedTrip = await TripModel.incrementOccupancy(trip.id);
       }
 
-      // Also update occupancy table
+      // Also update occupancy table — atomically enforces capacity cap
       const OccupancyModel = require('../models/occupancyModel');
-      occupancy = await OccupancyModel.incrementOccupancy(finalVehicleId);
+      const { updated: occupancyUpdated, row: occupancyRow } = await OccupancyModel.incrementOccupancy(finalVehicleId);
+      const occupancy = occupancyRow;
+
+      if (!occupancyUpdated) {
+        return res.status(409).json({
+          message: 'Vehicle is already full. No more passengers can be added.',
+          occupancy: occupancyRow,
+        });
+      }
 
       // Send WhatsApp confirmation if available
       try {

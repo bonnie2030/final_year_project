@@ -19,6 +19,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import LeafletAutoResize from "./LeafletAutoResize";
 
 delete (L.Icon.Default.prototype as any)._getIconUrl;
 L.Icon.Default.mergeOptions({
@@ -72,9 +73,11 @@ interface MapBoundsProps {
 function MapBounds({ bounds }: MapBoundsProps) {
   const map = useMap();
 
-  if (bounds) {
+  useEffect(() => {
+    if (!bounds) return;
+    map.invalidateSize({ pan: false, debounceMoveend: true });
     map.fitBounds(bounds, { padding: [50, 50] });
-  }
+  }, [bounds, map]);
 
   return null;
 }
@@ -229,39 +232,39 @@ const RouteVisualizationMap = () => {
   return (
     <div className="space-y-4">
       {/* Desktop Layout */}
-      <div className="hidden md:grid md:grid-cols-4 md:gap-4 md:h-96">
+      <div className="hidden md:grid md:grid-cols-12 md:gap-4 md:h-[460px]">
         {/* Route Sidebar */}
-        <div className="md:col-span-1 bg-white border border-border rounded-lg overflow-hidden flex flex-col">
-          <div className="bg-blue-50 border-b border-border p-3">
-            <h3 className="font-semibold text-sm text-blue-900">Available Routes</h3>
+        <div className="md:col-span-4 bg-slate-50 border border-slate-200 rounded-xl overflow-hidden flex flex-col">
+          <div className="bg-gradient-to-r from-slate-100 to-blue-50 border-b border-slate-200 p-3">
+            <h3 className="font-semibold text-sm text-slate-900">Available Routes</h3>
             <p className="text-xs text-blue-700 mt-1">
               {validRoutes.length} route{validRoutes.length !== 1 ? "s" : ""}
             </p>
           </div>
 
-          <div className="overflow-y-auto flex-1">
+          <div className="overflow-y-auto flex-1 p-2 space-y-2">
             {validRoutes.map((route: Route) => (
               route.id ? (
                 <button
                   key={route.id}
                   onClick={() => setSelectedRouteId(route.id)}
-                  className={`w-full text-left px-3 py-3 border-b border-border transition-colors ${
+                  className={`w-full text-left px-3 py-3 rounded-lg border transition-all ${
                     selectedRouteId === route.id
-                      ? "bg-blue-100 border-l-4 border-l-blue-600"
-                      : "hover:bg-gray-50"
+                      ? "bg-blue-100 border-blue-300 shadow-sm"
+                      : "bg-white border-slate-200 hover:bg-slate-100"
                   }`}
                 >
-                  <p className="font-medium text-sm text-gray-900">
+                  <p className="font-semibold text-sm text-slate-900 truncate">
                     {route.route_name}
                   </p>
-                  <p className="text-xs text-gray-600 mt-1">
-                    📍 {route.start_location}
+                  <p className="text-xs text-slate-600 mt-1 truncate">
+                    Start: {route.start_location}
                   </p>
-                  <p className="text-xs text-gray-600">
-                    📍 {route.end_location}
+                  <p className="text-xs text-slate-600 truncate">
+                    End: {route.end_location}
                   </p>
                   {route.vehicle_count !== undefined && (
-                    <Badge variant="secondary" className="mt-2 text-xs">
+                    <Badge variant="secondary" className="mt-2 text-xs bg-white border border-slate-200 text-slate-700">
                       {route.vehicle_count} vehicle{route.vehicle_count !== 1 ? "s" : ""}
                     </Badge>
                   )}
@@ -272,18 +275,19 @@ const RouteVisualizationMap = () => {
         </div>
 
         {/* Map */}
-        <div className="md:col-span-3 border border-border rounded-lg overflow-hidden">
+        <div className="md:col-span-8 border border-slate-200 rounded-xl overflow-hidden bg-white shadow-sm">
           {isRoutePathLoading && selectedRoute && (
-            <div className="bg-blue-50 text-blue-900 text-xs px-3 py-2 border-b border-border">
+            <div className="bg-blue-50 text-blue-900 text-xs px-3 py-2 border-b border-blue-200">
               Loading road path for {selectedRoute.route_name}...
             </div>
           )}
           <MapContainer
             center={defaultCenter}
             zoom={13}
-            scrollWheelZoom={true}
+            scrollWheelZoom={false}
             style={{ width: "100%", height: "100%" }}
           >
+            <LeafletAutoResize watch={[selectedRouteId, visibleRoutes.length, isRoutePathLoading]} />
             <TileLayer
               attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
               url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
@@ -372,18 +376,19 @@ const RouteVisualizationMap = () => {
           </SelectContent>
         </Select>
 
-        <div className="border border-border rounded-lg overflow-hidden h-64 relative z-0">
+        <div className="border border-slate-200 rounded-xl overflow-hidden h-72 relative z-0 bg-white shadow-sm">
           {isRoutePathLoading && selectedRoute && (
-            <div className="bg-blue-50 text-blue-900 text-xs px-3 py-2 border-b border-border">
+            <div className="bg-blue-50 text-blue-900 text-xs px-3 py-2 border-b border-blue-200">
               Loading road path for {selectedRoute.route_name}...
             </div>
           )}
           <MapContainer
             center={defaultCenter}
             zoom={13}
-            scrollWheelZoom={true}
+            scrollWheelZoom={false}
             style={{ width: "100%", height: "100%" }}
           >
+            <LeafletAutoResize watch={[selectedRouteId, visibleRoutes.length, isRoutePathLoading]} />
             <TileLayer
               attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
               url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
@@ -433,9 +438,9 @@ const RouteVisualizationMap = () => {
 
       {/* Route Details Card */}
       {selectedRoute && (
-        <Card className="bg-blue-50 border-blue-200">
+        <Card className="bg-gradient-to-r from-blue-50 to-sky-50 border-blue-200 shadow-sm">
           <CardHeader className="pb-3">
-            <CardTitle className="text-sm text-blue-900">
+            <CardTitle className="text-base text-blue-900">
               {selectedRoute.route_name}
             </CardTitle>
           </CardHeader>

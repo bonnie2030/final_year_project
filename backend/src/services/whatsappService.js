@@ -12,6 +12,17 @@ class WhatsAppService {
     }
   }
 
+  getSandboxJoinDetails() {
+    const sandboxNumber = (process.env.TWILIO_SANDBOX_JOIN_NUMBER || this.whatsappNumber || 'whatsapp:+14155238886')
+      .replace(/^whatsapp:/i, '');
+    const sandboxCode = (process.env.TWILIO_SANDBOX_JOIN_CODE || 'break-additional').trim();
+    return {
+      number: sandboxNumber,
+      code: sandboxCode,
+      phrase: `join ${sandboxCode}`,
+    };
+  }
+
   validateConfig() {
     if (!this.accountSid || !this.authToken || !this.whatsappNumber) {
       throw new Error('Twilio WhatsApp credentials not configured. Set TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN, and TWILIO_WHATSAPP_NUMBER');
@@ -19,8 +30,12 @@ class WhatsAppService {
   }
 
   formatPhoneNumber(phoneNumber) {
-    // Remove spaces and dashes, keep +
-    let formatted = phoneNumber.replace(/[\s\-]/g, '');
+    // Accept input like "0712...", "+254...", "whatsapp:+254...", or numbers with spaces/brackets.
+    let formatted = String(phoneNumber || '').trim().replace(/^whatsapp:/i, '');
+    formatted = formatted.replace(/[^0-9+]/g, '');
+    if (formatted.startsWith('00')) {
+      formatted = `+${formatted.substring(2)}`;
+    }
     // If starts with 0, replace with +254 (Kenya)
     if (formatted.startsWith('0')) {
       formatted = '+254' + formatted.substring(1);
@@ -81,13 +96,14 @@ class WhatsAppService {
       
       // Error 63007: Not in sandbox - send SMS fallback with join instructions
       if (error.code === 63007) {
+        const join = this.getSandboxJoinDetails();
         console.log('⚠️ User not in WhatsApp sandbox. They need to join first.');
         return { 
           success: false, 
           error: error.message, 
           code: 63007,
           needsJoin: true,
-          joinInstructions: 'Send "join break-additional" to +1 415 523 8886 on WhatsApp'
+          joinInstructions: `Send "${join.phrase}" to ${join.number} on WhatsApp`
         };
       }
       
@@ -101,16 +117,17 @@ class WhatsAppService {
    * @returns {Promise} Result of sending instructions
    */
   async sendJoinInstructions(phoneNumber) {
+    const join = this.getSandboxJoinDetails();
     const joinMessage = `🎯 *MatatuConnect - Setup Required*
 
 To get WhatsApp notifications:
 
 📝 *STEP 1:*
 Send this exact message:
-*join break-additional*
+*${join.phrase}*
 
 📱 *STEP 2:*
-Send it to: *+1 415 523 8886*
+Send it to: *${join.number}*
 
 ⏱ *Duration:* 72 hours (rejoin anytime)
 

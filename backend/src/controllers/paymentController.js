@@ -46,6 +46,7 @@ const STK_FAILURE_GRACE_MS = 15000;
 const STK_TIMEOUT_FAILURE_GRACE_MS = 60000;
 const STK_TIMEOUT_FAILURE_THRESHOLD = 2;
 const ASSUMED_SUCCESS_DELAY_MS = 10000;
+const ENABLE_AUTO_PAYMENT_WHATSAPP = String(process.env.ENABLE_AUTO_PAYMENT_WHATSAPP || 'false').toLowerCase() === 'true';
 const stkQueryLastRunByCheckout = new Map();
 const stkTimeoutCountByCheckout = new Map();
 
@@ -72,6 +73,124 @@ const emitPaymentStatusUpdate = (io, payment, extras = {}) => {
 };
 
 class PaymentController {
+  static async getVehiclePaymentAvailability(vehicleId) {
+    const vehicle = await VehicleModel.getVehicleById(vehicleId);
+    if (!vehicle) {
+      return { available: false, reason: 'Vehicle not found' };
+    }
+
+    const capacity = Number(vehicle.capacity || 14);
+    const occupancy = await OccupancyModel.getOccupancyStatus(vehicleId);
+    const currentOccupancy = Number(occupancy?.current_occupancy || 0);
+    const isFullByCount = currentOccupancy >= capacity;
+    const isFullByStatus = String(occupancy?.occupancy_status || '').toLowerCase() === 'full';
+
+    return {
+      available: !(isFullByCount || isFullByStatus),
+      reason: isFullByCount || isFullByStatus ? 'Vehicle is full' : null,
+      vehicle,
+      currentOccupancy,
+      capacity,
+    };
+  }
+
+  static async sendTicketToWhatsApp(req, res) {
+    try {
+      const paymentId = Number(req.params.paymentId);
+      console.log('[PaymentController.sendTicketToWhatsApp] Called with paymentId:', paymentId, 'from params:', req.params);
+      
+      if (!Number.isFinite(paymentId) || paymentId <= 0) {
+        console.error('[PaymentController] Invalid paymentId:', paymentId);
+        return res.status(400).json({ message: 'A valid payment ID is required', paymentId });
+      }
+
+      const payment = await PaymentModel.getPaymentByIdWithDetails(paymentId);
+      if (!payment) {
+        console.error('[PaymentController] Payment not found for paymentId:', paymentId);
+        return res.status(404).json({ message: 'Payment not found', paymentId });
+      }
+
+      console.log('[PaymentController] Found payment:', { id: payment.id, status: payment.status, phone: payment.phone_number });
+      
+      if (String(payment.status).toLowerCase() !== 'completed') {
+        console.error('[PaymentController] Payment not completed, status:', payment.status);
+        return res.status(400).json({ message: 'Ticket can only be sent after payment is completed', status: payment.status });
+      }
+
+      const normalizedPhone = normalizePhoneNumber(payment.phone_number);
+      if (!normalizedPhone) {
+        console.error('[PaymentController] Could not normalize phone number:', payment.phone_number);
+        return res.status(400).json({ message: 'Payment does not have a valid phone number for WhatsApp', phone: payment.phone_number });
+      }
+
+      console.log('[PaymentController] Sending WhatsApp to normalized phone:', normalizedPhone);
+      const ticketReference = getSafeTicketReference(payment);
+      const whatsappResult = await WhatsappService.sendPaymentConfirmation(normalizedPhone, {
+        routeName: payment.route_name || `Route ${payment.route_id}`,
+        vehicleNumber: payment.vehicle_number || 'N/A',
+        amount: payment.amount,
+        transactionId: ticketReference,
+      });
+
+      console.log('[PaymentController] WhatsApp send result:', whatsappResult);
+      
+      if (whatsappResult?.success === false) {
+        console.error('[PaymentController] WhatsApp send failed:', whatsappResult);
+        
+        // If user is not in sandbox, automatically send SMS with join instructions
+        if (whatsappResult?.code === 63007 || whatsappResult?.needsJoin) {
+          console.log('[PaymentController] User not in WhatsApp sandbox, sending SMS join instructions...');
+          try {
+            const joinMessage = `🎯 MatatuConnect - WhatsApp Setup Required
+
+To get your ticket via WhatsApp:
+
+1️⃣ Open WhatsApp
+2️⃣ Message: +1 415 523 8886
+3️⃣ Send: join break-additional
+4️⃣ Confirm sandbox invitation
+5️⃣ Your ticket will appear here!
+
+⏱️ Setup takes 30 seconds
+✨ After setup, you'll get WhatsApp tickets instantly!`;
+
+            await SmsService.sendSms(payment.phone_number, joinMessage);
+            console.log('[PaymentController] ✓ SMS join instructions sent successfully');
+            
+            return res.status(202).json({
+              message: 'WhatsApp not available yet. Instructions sent via SMS!',
+              needsSetup: true,
+              setupMethod: 'sms_sent',
+              details: 'Check your SMS for WhatsApp setup instructions. You\'ll need to join the WhatsApp sandbox first.',
+              whatsapp: whatsappResult,
+            });
+          } catch (smsError) {
+            console.error('[PaymentController] Failed to send SMS instructions:', smsError.message);
+            return res.status(502).json({
+              message: 'WhatsApp not available and could not send SMS instructions',
+              whatsapp: whatsappResult,
+            });
+          }
+        }
+        
+        return res.status(502).json({
+          message: 'WhatsApp send failed',
+          whatsapp: whatsappResult,
+        });
+      }
+
+      console.log('[PaymentController] WhatsApp ticket sent successfully to:', normalizedPhone);
+      return res.status(200).json({
+        message: 'Ticket sent to WhatsApp',
+        ticket_reference: ticketReference,
+        whatsapp: whatsappResult || { success: true },
+      });
+    } catch (error) {
+      console.error('[PaymentController] Send ticket to WhatsApp error:', error);
+      return res.status(500).json({ message: 'Failed to send ticket via WhatsApp', error: error.message, stack: error.stack });
+    }
+  }
+
   static async finalizeAssumedSuccessPayment(paymentId, io = null) {
     const assumedTransactionId = `ASSUMED-${paymentId}-${Date.now()}`;
     const completedPayment = await PaymentModel.updatePaymentStatus(
@@ -92,7 +211,9 @@ class PaymentController {
       amount: normalizedCompleted.amount,
     });
 
-    PaymentController.queuePaymentWhatsAppNotifications(normalizedCompleted, ticketReference);
+    if (ENABLE_AUTO_PAYMENT_WHATSAPP) {
+      PaymentController.queuePaymentWhatsAppNotifications(normalizedCompleted, ticketReference);
+    }
     await PaymentController.autoIncrementOccupancy(normalizedCompleted, io);
     return normalizedCompleted;
   }
@@ -102,12 +223,24 @@ class PaymentController {
 
     try {
       if (paymentRecord.phone_number) {
-        await WhatsappService.sendPaymentConfirmation(paymentRecord.phone_number, {
+        const whatsappResult = await WhatsappService.sendPaymentConfirmation(paymentRecord.phone_number, {
           routeName: paymentRecord.route_name || `Route ${paymentRecord.route_id}`,
           vehicleNumber: paymentRecord.vehicle_number || 'N/A',
           amount: paymentRecord.amount,
           transactionId: ticketReference,
         });
+        
+        // If user is not in sandbox, send SMS with join instructions
+        if (whatsappResult?.code === 63007 || whatsappResult?.needsJoin) {
+          console.log('[SendPaymentWhatsApp] User not in sandbox, sending SMS join instructions');
+          try {
+            const joinMessage = `🎯 MatatuConnect - WhatsApp Setup Required\n\nTo get your ticket via WhatsApp:\n\n1️⃣ Open WhatsApp\n2️⃣ Message: +1 415 523 8886\n3️⃣ Send: join break-additional\n4️⃣ Confirm sandbox invitation\n5️⃣ Your ticket will appear here!\n\n⏱️ Setup takes 30 seconds\n✨ After setup, you'll get WhatsApp tickets instantly!`;
+            await SmsService.sendSms(paymentRecord.phone_number, joinMessage);
+            console.log('[SendPaymentWhatsApp] ✓ SMS join instructions sent to customer');
+          } catch (smsError) {
+            console.error('[SendPaymentWhatsApp] Failed to send SMS join instructions:', smsError.message);
+          }
+        }
       }
     } catch (whatsappError) {
       console.error('WhatsApp notification to customer failed:', whatsappError.message);
@@ -117,13 +250,25 @@ class PaymentController {
       try {
         const driver = await DriverModel.getDriverByVehicleId(paymentRecord.vehicle_id);
         if (driver && driver.phone) {
-          await WhatsappService.sendPaymentConfirmation(driver.phone, {
+          const driverWhatsappResult = await WhatsappService.sendPaymentConfirmation(driver.phone, {
             routeName: paymentRecord.route_name || `Route ${paymentRecord.route_id}`,
             vehicleNumber: paymentRecord.vehicle_number || 'N/A',
             amount: paymentRecord.amount,
             transactionId: ticketReference,
             recipientType: 'driver',
           });
+          
+          // If driver is not in sandbox, send SMS with join instructions
+          if (driverWhatsappResult?.code === 63007 || driverWhatsappResult?.needsJoin) {
+            console.log('[SendPaymentWhatsApp] Driver not in sandbox, sending SMS join instructions');
+            try {
+              const joinMessage = `🎯 MatatuConnect - WhatsApp Setup Required\n\nTo get payment notifications via WhatsApp:\n\n1️⃣ Open WhatsApp\n2️⃣ Message: +1 415 523 8886\n3️⃣ Send: join break-additional\n4️⃣ Confirm sandbox invitation\n\n⏱️ Setup takes 30 seconds\n✨ After setup, receive instant payment alerts!`;
+              await SmsService.sendSms(driver.phone, joinMessage);
+              console.log('[SendPaymentWhatsApp] ✓ SMS join instructions sent to driver');
+            } catch (smsError) {
+              console.error('[SendPaymentWhatsApp] Failed to send SMS join instructions to driver:', smsError.message);
+            }
+          }
         }
       } catch (driverError) {
         console.error('WhatsApp notification to driver failed:', driverError.message);
@@ -142,7 +287,7 @@ class PaymentController {
   }
 
   // Auto-increment vehicle occupancy when a payment completes.
-  // Assigns vehicle_id to the payment if not set, then increments occupancy of the active vehicle.
+  // Uses an atomic DB upsert so concurrent payments cannot overcount or exceed capacity.
   static async autoIncrementOccupancy(payment, io = null) {
     if (!payment) return;
     try {
@@ -164,26 +309,31 @@ class PaymentController {
       if (!vehicle) return;
 
       const capacity = Number(vehicle.capacity || 14);
-      const occupancyRecord = await OccupancyModel.getOccupancyStatus(vehicleId);
-      const currentOccupancy = Number(occupancyRecord?.current_occupancy || 0);
 
-      if (currentOccupancy >= capacity) return; // already full, next payment will go to next vehicle
+      // Atomically increment — the DB rejects the update if vehicle is already full
+      const { updated, row } = await OccupancyModel.incrementOccupancyIfNotFull(vehicleId, capacity);
 
-      const newOccupancy = currentOccupancy + 1;
-      const driverId = vehicle.user_id || null;
-      const updated = await OccupancyModel.updateOccupancyCount(vehicleId, driverId, newOccupancy, capacity);
+      if (!updated) {
+        // Vehicle was already full; this payment was recorded but should not have been allowed.
+        // Log for debugging — the availability pre-check in initiatePayment/simulatePayment
+        // should prevent reaching here under normal conditions.
+        console.warn(`[autoIncrementOccupancy] vehicle ${vehicleId} was full when payment ${payment.id} completed — occupancy not changed`);
+        return row;
+      }
 
       if (io) {
+        const driverId = vehicle.user_id || null;
         const payload = {
           vehicle_id: vehicleId,
-          current_occupancy: newOccupancy,
-          occupancy_status: updated.occupancy_status,
+          current_occupancy: row.current_occupancy,
+          occupancy_status: row.occupancy_status,
           capacity,
         };
         io.to('admin').emit('vehicle.occupancyUpdated', payload);
         if (driverId) io.to(`user_${driverId}`).emit('vehicle.occupancyUpdated', payload);
+        io.to(`vehicle_${vehicleId}`).emit('vehicle.occupancyUpdated', payload);
       }
-      return updated;
+      return row;
     } catch (err) {
       console.error('Auto increment occupancy error:', err.message);
     }
@@ -259,7 +409,9 @@ class PaymentController {
             route_name: result.route_name || null,
             amount: result.amount,
           });
-          PaymentController.queuePaymentWhatsAppNotifications(result, ticketReference);
+          if (ENABLE_AUTO_PAYMENT_WHATSAPP) {
+            PaymentController.queuePaymentWhatsAppNotifications(result, ticketReference);
+          }
           // Auto-increment vehicle occupancy from this completed payment
           await PaymentController.autoIncrementOccupancy(updated, io);
           paymentDebugLog('reconcile.marked.completed', {
@@ -404,11 +556,32 @@ class PaymentController {
       if (vehicle) {
         const foundVehicle = await VehicleModel.getVehicleByRegistration(String(vehicle).trim().toUpperCase());
         vehicleId = foundVehicle?.id || null;
+
+        if (!vehicleId) {
+          return res.status(404).json({ message: 'Selected vehicle was not found' });
+        }
+
+        const availability = await PaymentController.getVehiclePaymentAvailability(vehicleId);
+        if (!availability.available) {
+          return res.status(409).json({
+            message: 'This vehicle is full. Please select another vehicle.',
+            reason: availability.reason,
+            vehicle_id: vehicleId,
+            current_occupancy: availability.currentOccupancy,
+            capacity: availability.capacity,
+          });
+        }
       }
       // Auto-assign the active vehicle for this route if none specified
       if (!vehicleId && parsedRouteId) {
         const activeVehicle = await VehicleModel.getActiveVehicleForRoute(parsedRouteId);
         vehicleId = activeVehicle?.id || null;
+        if (!vehicleId) {
+          return res.status(409).json({
+            message: 'All vehicles on this route are currently full. Please try again later.',
+            reason: 'ROUTE_FULL',
+          });
+        }
       }
 
       paymentRecord = await PaymentModel.initiatePayment(
@@ -593,7 +766,9 @@ class PaymentController {
           amount: updatedPayment.amount,
         });
 
-        PaymentController.queuePaymentWhatsAppNotifications(paymentWithDetails || updatedPayment, ticketReference);
+        if (ENABLE_AUTO_PAYMENT_WHATSAPP) {
+          PaymentController.queuePaymentWhatsAppNotifications(paymentWithDetails || updatedPayment, ticketReference);
+        }
 
         console.log(`✓ Payment verified and completed for payment_id=${updatedPayment.id}`);
         paymentDebugLog('callback.marked.completed', {
@@ -668,12 +843,33 @@ class PaymentController {
       if (incomingVehicle) {
         const foundVehicle = await VehicleModel.getVehicleByRegistration(incomingVehicle);
         vehicleId = foundVehicle?.id || null;
+
+        if (!vehicleId) {
+          return res.status(404).json({ message: 'Selected vehicle was not found' });
+        }
+
+        const availability = await PaymentController.getVehiclePaymentAvailability(vehicleId);
+        if (!availability.available) {
+          return res.status(409).json({
+            message: 'This vehicle is full. Please select another vehicle.',
+            reason: availability.reason,
+            vehicle_id: vehicleId,
+            current_occupancy: availability.currentOccupancy,
+            capacity: availability.capacity,
+          });
+        }
       }
 
       // Auto-assign the active vehicle for this route if none specified
       if (!vehicleId) {
         const activeVehicle = await VehicleModel.getActiveVehicleForRoute(Number(routeId));
         vehicleId = activeVehicle?.id || null;
+        if (!vehicleId) {
+          return res.status(409).json({
+            message: 'All vehicles on this route are currently full. Please try again later.',
+            reason: 'ROUTE_FULL',
+          });
+        }
       }
 
       // Create payment record
@@ -694,6 +890,8 @@ class PaymentController {
               route_name: paymentWithDetails.route_name || null,
               amount: paymentWithDetails.amount,
             });
+            // Increment vehicle occupancy now that payment is confirmed
+            await PaymentController.autoIncrementOccupancy(paymentWithDetails, io);
           }
         } catch (simulateUpdateError) {
           console.error('Simulated payment completion update error:', simulateUpdateError.message);
@@ -711,24 +909,26 @@ class PaymentController {
           console.error('SMS notification failed:', smsError);
         }
 
-        try {
-          const whatsappResult = await WhatsappService.sendPaymentConfirmation(phoneNumber, {
-            routeName: `Route ${routeId}`,
-            vehicleNumber: incomingVehicle || undefined,
-            amount: amount,
-            transactionId: simulatedTransactionId
-          });
+        if (ENABLE_AUTO_PAYMENT_WHATSAPP) {
+          try {
+            const whatsappResult = await WhatsappService.sendPaymentConfirmation(phoneNumber, {
+              routeName: `Route ${routeId}`,
+              vehicleNumber: incomingVehicle || undefined,
+              amount: amount,
+              transactionId: simulatedTransactionId
+            });
 
-          if (whatsappResult?.success === false && (whatsappResult.needsJoin || whatsappResult.code === 63007)) {
-            try {
-              const joinInstructions = `MatatuConnect: Payment received KES ${amount}! Get WhatsApp alerts - Send "join break-additional" to +14155238886. Takes 5 sec!`;
-              await SmsService.sendSms(phoneNumber, joinInstructions);
-            } catch (smsFallbackError) {
-              console.error('SMS join instructions failed:', smsFallbackError.message);
+            if (whatsappResult?.success === false && (whatsappResult.needsJoin || whatsappResult.code === 63007)) {
+              try {
+                const joinInstructions = `MatatuConnect: Payment received KES ${amount}! Get WhatsApp alerts - Send "join break-additional" to +14155238886. Takes 5 sec!`;
+                await SmsService.sendSms(phoneNumber, joinInstructions);
+              } catch (smsFallbackError) {
+                console.error('SMS join instructions failed:', smsFallbackError.message);
+              }
             }
+          } catch (whatsappError) {
+            console.error('WhatsApp notification failed:', whatsappError.message);
           }
-        } catch (whatsappError) {
-          console.error('WhatsApp notification failed:', whatsappError.message);
         }
       });
 
@@ -742,7 +942,7 @@ class PaymentController {
         notificationsSent: {
           sms: false,
           whatsapp: false,
-          queued: true
+          queued: ENABLE_AUTO_PAYMENT_WHATSAPP
         }
       });
     } catch (error) {

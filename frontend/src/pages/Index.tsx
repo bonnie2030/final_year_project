@@ -1,5 +1,3 @@
-/* The above code is a TypeScript React component for a web application called "MatatuConnect" which is
-a matatu booking platform in Kenya. Here is a summary of what the code is doing: */
 import React, { useMemo, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import Header from "@/components/Header";
@@ -390,7 +388,7 @@ export default function Index() {
           </section>
 
           {/* Features Section - Enhanced Visual Design */}
-          <section className="animate-fade-in" aria-labelledby="features-heading">
+          <section id="features" className="animate-fade-in scroll-mt-24" aria-labelledby="features-heading">
             <div className="text-center mb-10 sm:mb-12">
               <h2 id="features-heading" className="text-2xl sm:text-3xl font-bold text-gray-900 mb-3">Why Choose MatatuConnect?</h2>
               <p className="text-base sm:text-lg text-gray-600 max-w-2xl mx-auto">
@@ -447,8 +445,44 @@ export default function Index() {
             </div>
           </section>
 
+          {/* How It Works Section */}
+          <section id="how-it-works" className="animate-fade-in scroll-mt-24" aria-labelledby="how-it-works-heading">
+            <div className="text-center mb-10 sm:mb-12">
+              <h2 id="how-it-works-heading" className="text-2xl sm:text-3xl font-bold text-gray-900 mb-3">How It Works</h2>
+              <p className="text-base sm:text-lg text-gray-600 max-w-2xl mx-auto">
+                Three simple steps to make daily commuting smoother and safer.
+              </p>
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+              <div className="rounded-2xl border border-green-100 bg-gradient-to-br from-white to-green-50 p-6 shadow-sm">
+                <span className="inline-flex h-9 w-9 items-center justify-center rounded-full bg-green-600 text-sm font-bold text-white">1</span>
+                <h3 className="mt-4 text-lg font-bold text-gray-900">Find Your Route</h3>
+                <p className="mt-2 text-sm text-gray-600">
+                  Search a route instantly and compare live occupancy before leaving.
+                </p>
+              </div>
+
+              <div className="rounded-2xl border border-blue-100 bg-gradient-to-br from-white to-blue-50 p-6 shadow-sm">
+                <span className="inline-flex h-9 w-9 items-center justify-center rounded-full bg-blue-600 text-sm font-bold text-white">2</span>
+                <h3 className="mt-4 text-lg font-bold text-gray-900">Pay Seamlessly</h3>
+                <p className="mt-2 text-sm text-gray-600">
+                  Complete fare payment via M-Pesa and receive a digital confirmation ticket.
+                </p>
+              </div>
+
+              <div className="rounded-2xl border border-amber-100 bg-gradient-to-br from-white to-amber-50 p-6 shadow-sm">
+                <span className="inline-flex h-9 w-9 items-center justify-center rounded-full bg-amber-500 text-sm font-bold text-white">3</span>
+                <h3 className="mt-4 text-lg font-bold text-gray-900">Travel with Confidence</h3>
+                <p className="mt-2 text-sm text-gray-600">
+                  Track updates in real time and report issues quickly when they happen.
+                </p>
+              </div>
+            </div>
+          </section>
+
           {/* Testimonials Section - Social Proof */}
-          <section className="bg-gradient-to-br from-gray-900 to-gray-800 rounded-3xl p-8 sm:p-12 text-white animate-fade-in" aria-labelledby="testimonials-heading">
+          <section id="about" className="bg-gradient-to-br from-gray-900 to-gray-800 rounded-3xl p-8 sm:p-12 text-white animate-fade-in scroll-mt-24" aria-labelledby="testimonials-heading">
             <div className="text-center mb-10 sm:mb-12">
               <h2 id="testimonials-heading" className="text-2xl sm:text-3xl font-bold mb-3">Trusted by Thousands of Commuters</h2>
               <p className="text-base sm:text-lg text-gray-300">

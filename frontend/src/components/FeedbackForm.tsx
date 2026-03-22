@@ -252,6 +252,18 @@ const FeedbackForm = ({ route, onBack, onSuccess }: FeedbackFormProps) => {
 
   return (
     <form onSubmit={handleSubmit} className="space-y-5 sm:space-y-6 animate-fade-in">
+      <div className="rounded-xl border border-blue-200 bg-blue-50 px-3 py-3">
+        <p className="text-xs font-semibold text-blue-900 mb-1">Before you submit</p>
+        <p className="text-xs text-blue-800">Share route, vehicle, and specific event details so the team can respond faster and more accurately.</p>
+      </div>
+
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-xs">
+        <div className={cn('rounded-lg border px-2.5 py-2 text-center', selectedRouteId ? 'border-emerald-300 bg-emerald-50 text-emerald-800' : 'border-slate-200 bg-slate-50 text-slate-600')}>1. Route</div>
+        <div className={cn('rounded-lg border px-2.5 py-2 text-center', selectedVehicleId ? 'border-emerald-300 bg-emerald-50 text-emerald-800' : 'border-slate-200 bg-slate-50 text-slate-600')}>2. Vehicle</div>
+        <div className={cn('rounded-lg border px-2.5 py-2 text-center', feedbackType ? 'border-emerald-300 bg-emerald-50 text-emerald-800' : 'border-slate-200 bg-slate-50 text-slate-600')}>3. Type</div>
+        <div className={cn('rounded-lg border px-2.5 py-2 text-center', messageValid ? 'border-emerald-300 bg-emerald-50 text-emerald-800' : 'border-slate-200 bg-slate-50 text-slate-600')}>4. Message</div>
+      </div>
+
       {/* Debug Info - Only show in development */}
       {import.meta.env.DEV && (
         <div className="text-xs bg-slate-50 p-3 rounded-xl border border-dashed border-slate-300 mb-4">
@@ -273,7 +285,7 @@ const FeedbackForm = ({ route, onBack, onSuccess }: FeedbackFormProps) => {
 
       {/* Route Select */}
       <div className="space-y-2">
-        <Label htmlFor="routeSelect" className="text-sm font-semibold text-slate-800">Route</Label>
+        <Label htmlFor="routeSelect" className="text-sm font-semibold text-slate-800">Route <span className="text-destructive">*</span></Label>
         <select
           id="routeSelect"
           value={selectedRouteId ?? ''}
@@ -299,7 +311,7 @@ const FeedbackForm = ({ route, onBack, onSuccess }: FeedbackFormProps) => {
 
       {/* Vehicle Select */}
       <div className="space-y-2">
-        <Label htmlFor="vehicleSelect" className="text-sm font-semibold text-slate-800">Vehicle</Label>
+        <Label htmlFor="vehicleSelect" className="text-sm font-semibold text-slate-800">Vehicle <span className="text-destructive">*</span></Label>
         <select
           id="vehicleSelect"
           value={selectedVehicleId ?? ''}
@@ -327,7 +339,7 @@ const FeedbackForm = ({ route, onBack, onSuccess }: FeedbackFormProps) => {
 
       {/* Feedback Type */}
       <div className="space-y-2">
-        <Label className="text-sm font-semibold text-slate-800">Feedback Type</Label>
+        <Label className="text-sm font-semibold text-slate-800">Feedback Type <span className="text-destructive">*</span></Label>
         <div className="grid grid-cols-2 gap-2 sm:gap-3">
           <button
             type="button"
@@ -553,7 +565,7 @@ const FeedbackForm = ({ route, onBack, onSuccess }: FeedbackFormProps) => {
       {/* Message */}
       <div className="space-y-2">
         <div className="flex justify-between items-center gap-2">
-          <Label htmlFor="message" className="text-sm font-semibold text-slate-800">Your Message</Label>
+          <Label htmlFor="message" className="text-sm font-semibold text-slate-800">Your Message <span className="text-destructive">*</span></Label>
           <span className={cn(
             "text-xs",
             message.length > 200 ? "text-destructive" : "text-muted-foreground"
@@ -563,7 +575,7 @@ const FeedbackForm = ({ route, onBack, onSuccess }: FeedbackFormProps) => {
         </div>
         <Textarea
           id="message"
-          placeholder="Share your experience..."
+          placeholder="Describe what happened, where, and when (brief but specific)."
           value={message}
           onChange={(e) => setMessage(e.target.value)}
           className={cn(
@@ -649,11 +661,15 @@ const FeedbackForm = ({ route, onBack, onSuccess }: FeedbackFormProps) => {
           ) : (
             <>
               <Send className="h-4 w-4" />
-              Submit
+              Submit Feedback
             </>
           )}
         </Button>
       </div>
+
+      <p className="text-[11px] text-slate-500 text-center">
+        By submitting, you confirm the information is accurate to the best of your knowledge.
+      </p>
     </form>
   );
 };

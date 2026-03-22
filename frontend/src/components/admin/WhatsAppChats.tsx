@@ -10,6 +10,8 @@ type ChatContact = {
   last_message_type?: string;
   last_direction?: string;
   unread_count?: number;
+  payment_sent_count?: number;
+  lost_found_sent_count?: number;
 };
 
 type ChatMessage = {
@@ -24,6 +26,27 @@ type ChatMessage = {
 
 const formatPhone = (value: string) => value.replace(/\s+/g, '').replace(/^\+/, '');
 const normalizePhone = (value: string) => value.replace(/[^0-9]/g, '');
+
+const getAuthHeaders = () => {
+  const token = localStorage.getItem('token');
+  return {
+    'Content-Type': 'application/json',
+    ...(token ? { Authorization: `Bearer ${token}` } : {}),
+  };
+};
+
+const messageTypeLabel = (type?: string) => {
+  if (!type) return 'General';
+  if (type === 'payment_confirmation' || type === 'payment_notification') return 'Payment';
+  if (type === 'lost_and_found_confirmation') return 'Lost & Found';
+  if (type === 'feedback_confirmation') return 'Feedback';
+  if (type === 'admin_chat') return 'Admin Chat';
+  if (type === 'admin_invite') return 'Invite';
+  return type.replace(/_/g, ' ');
+};
+
+const isPaymentType = (type?: string) => type === 'payment_confirmation' || type === 'payment_notification';
+const isLostAndFoundType = (type?: string) => type === 'lost_and_found_confirmation';
 
 // Format timestamp for Nairobi time (EAT = UTC+3) display
 // Database stores UTC timestamps, we convert to Nairobi time for display
@@ -52,18 +75,22 @@ export default function WhatsAppChats() {
   const [messageText, setMessageText] = useState('');
   const [phoneInput, setPhoneInput] = useState('');
   const [loading, setLoading] = useState(false);
-  const [invitedAll, setInvitedAll] = useState(false);
+  const [sourceFilter, setSourceFilter] = useState<'all' | 'payment' | 'lost_and_found'>('all');
 
   const loadContacts = async () => {
     try {
-      const res = await fetch(API_BASE + '/api/whatsapp/chats');
+      const res = await fetch(API_BASE + '/api/whatsapp/chats', {
+        headers: getAuthHeaders(),
+      });
       const data = await res.json();
 
       const baseContacts = res.ok ? (data.contacts || []) : [];
       const known = new Set(baseContacts.map((contact: ChatContact) => normalizePhone(contact.phone || '')));
 
       try {
-        const participantsRes = await fetch(API_BASE + '/api/admin/whatsapp/participants');
+        const participantsRes = await fetch(API_BASE + '/api/admin/whatsapp/participants', {
+          headers: getAuthHeaders(),
+        });
         const participantsData = await participantsRes.json();
         const participants = participantsRes.ok ? (participantsData.participants || []) : [];
 
@@ -85,20 +112,22 @@ export default function WhatsAppChats() {
 
       setContacts(baseContacts);
     } catch (error) {
-      // ignore
+      toast({ title: 'Failed to load WhatsApp chats', variant: 'destructive' });
     }
   };
 
   const loadConversation = async (phone: string) => {
     try {
-      const res = await fetch(API_BASE + `/api/whatsapp/chats/${encodeURIComponent(phone)}`);
+      const res = await fetch(API_BASE + `/api/whatsapp/chats/${encodeURIComponent(phone)}`, {
+        headers: getAuthHeaders(),
+      });
       const data = await res.json();
       if (res.ok) {
         const raw = data.messages || [];
         setConversation(raw.filter((msg: ChatMessage) => msg.message_type !== 'system_contact'));
       }
     } catch (error) {
-      // ignore
+      toast({ title: 'Failed to load conversation', variant: 'destructive' });
     }
   };
 
@@ -112,22 +141,6 @@ export default function WhatsAppChats() {
     }
   }, [activePhone]);
 
-  useEffect(() => {
-    if (!invitedAll && contacts.length > 0) {
-      const sendInvites = async () => {
-        for (const contact of contacts) {
-          await fetch(API_BASE + '/api/whatsapp/chats/invite', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ phone: contact.phone }),
-          });
-        }
-        setInvitedAll(true);
-      };
-      sendInvites();
-    }
-  }, [contacts, invitedAll]);
-
   const handleAddNumber = async () => {
     const normalized = formatPhone(phoneInput);
     if (!normalized) return;
@@ -136,7 +149,7 @@ export default function WhatsAppChats() {
       setLoading(true);
       await fetch(API_BASE + '/api/whatsapp/chats/invite', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: getAuthHeaders(),
         body: JSON.stringify({ phone: normalized }),
       });
       toast({ title: 'Invitation sent', description: `Auto invitation sent to ${normalized}` });
@@ -156,7 +169,7 @@ export default function WhatsAppChats() {
       setLoading(true);
       const res = await fetch(API_BASE + '/api/whatsapp/chats/send', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: getAuthHeaders(),
         body: JSON.stringify({ phone: activePhone, message: messageText }),
       });
       const data = await res.json();
@@ -181,6 +194,7 @@ export default function WhatsAppChats() {
       setLoading(true);
       const res = await fetch(API_BASE + `/api/whatsapp/chats/${encodeURIComponent(phone)}`, {
         method: 'DELETE',
+        headers: getAuthHeaders(),
       });
       const data = await res.json();
       
@@ -209,13 +223,26 @@ export default function WhatsAppChats() {
     });
   }, [contacts]);
 
+  const filteredConversation = useMemo(() => {
+    if (sourceFilter === 'all') return conversation;
+    if (sourceFilter === 'payment') return conversation.filter((msg) => isPaymentType(msg.message_type));
+    return conversation.filter((msg) => isLostAndFoundType(msg.message_type));
+  }, [conversation, sourceFilter]);
+
+  const activeStats = useMemo(() => {
+    const outgoing = conversation.filter((msg) => msg.direction === 'outgoing');
+    const paymentCount = outgoing.filter((msg) => isPaymentType(msg.message_type)).length;
+    const lostFoundCount = outgoing.filter((msg) => isLostAndFoundType(msg.message_type)).length;
+    return { paymentCount, lostFoundCount, totalOutgoing: outgoing.length };
+  }, [conversation]);
+
   return (
     <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
       <div className="rounded-xl border bg-white p-4 shadow-sm">
         <div className="flex items-center justify-between mb-3">
           <div>
             <h3 className="font-semibold">WhatsApp Users</h3>
-            <p className="text-xs text-muted-foreground">Auto invites are sent to all numbers</p>
+            <p className="text-xs text-muted-foreground">Track sent notifications by user and source</p>
           </div>
           <span className="text-xs bg-emerald-50 text-emerald-700 px-2 py-1 rounded-full">{sortedContacts.length}</span>
         </div>
@@ -250,6 +277,17 @@ export default function WhatsAppChats() {
                     <div className="font-medium">{contact.phone}</div>
                     <div className="text-xs text-muted-foreground mt-1">
                       Last: {contact.last_message_at ? formatNairobiDateTime(contact.last_message_at) : '—'}
+                    </div>
+                    <div className="mt-1">
+                      <span className="inline-flex items-center rounded-full bg-slate-100 px-2 py-0.5 text-[10px] text-slate-700">
+                        {messageTypeLabel(contact.last_message_type)}
+                      </span>
+                      <span className="inline-flex items-center rounded-full bg-emerald-50 px-2 py-0.5 text-[10px] text-emerald-700 ml-1">
+                        Pay: {Number(contact.payment_sent_count) || 0}
+                      </span>
+                      <span className="inline-flex items-center rounded-full bg-amber-50 px-2 py-0.5 text-[10px] text-amber-700 ml-1">
+                        L&F: {Number(contact.lost_found_sent_count) || 0}
+                      </span>
                     </div>
                   </button>
                   <div className="flex items-center gap-2">
@@ -288,7 +326,9 @@ export default function WhatsAppChats() {
             <div className="flex items-center justify-between">
               <div>
                 <p className="text-xs text-muted-foreground">Admin WhatsApp chat</p>
-                <span className="text-xs text-muted-foreground">{conversation.length} messages</span>
+                <span className="text-xs text-muted-foreground">
+                  {conversation.length} messages | Sent: {activeStats.totalOutgoing} | Payment: {activeStats.paymentCount} | Lost&Found: {activeStats.lostFoundCount}
+                </span>
               </div>
               <button
                 type="button"
@@ -303,7 +343,31 @@ export default function WhatsAppChats() {
             </div>
 
             <div className="h-80 overflow-auto mb-3 rounded-lg border bg-slate-50 p-4 flex flex-col gap-2">
-              {conversation.map((msg) => {
+              <div className="mb-2 flex flex-wrap gap-2">
+                <button
+                  type="button"
+                  onClick={() => setSourceFilter('all')}
+                  className={`rounded-full px-3 py-1 text-xs border ${sourceFilter === 'all' ? 'bg-emerald-600 text-white border-emerald-600' : 'bg-white text-slate-700 border-slate-300'}`}
+                >
+                  All
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setSourceFilter('payment')}
+                  className={`rounded-full px-3 py-1 text-xs border ${sourceFilter === 'payment' ? 'bg-emerald-600 text-white border-emerald-600' : 'bg-white text-slate-700 border-slate-300'}`}
+                >
+                  Payment
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setSourceFilter('lost_and_found')}
+                  className={`rounded-full px-3 py-1 text-xs border ${sourceFilter === 'lost_and_found' ? 'bg-emerald-600 text-white border-emerald-600' : 'bg-white text-slate-700 border-slate-300'}`}
+                >
+                  Lost & Found
+                </button>
+              </div>
+
+              {filteredConversation.map((msg) => {
                 const isOutgoing = msg.direction === 'outgoing';
                 const isUnread = !msg.is_read && !isOutgoing;
                 return (
@@ -320,11 +384,17 @@ export default function WhatsAppChats() {
                     <div className={isUnread ? 'font-semibold' : ''}>{msg.message}</div>
                     <div className={`mt-1 text-[10px] ${isUnread ? 'text-blue-600' : 'text-muted-foreground'}`}>
                       {formatNairobiDateTime(msg.created_at)}
+                      {' · '}
+                      {messageTypeLabel(msg.message_type)}
                       {isOutgoing && (msg.is_read ? ' ✓✓' : ' ✓')}
                     </div>
                   </div>
                 );
               })}
+
+              {filteredConversation.length === 0 && (
+                <div className="text-xs text-muted-foreground p-3 text-center">No messages for this filter.</div>
+              )}
             </div>
 
             <div className="flex gap-2 items-center">

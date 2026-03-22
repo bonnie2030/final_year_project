@@ -244,11 +244,13 @@ const OccupancyDisplay = ({ interactive = true, showPayButton = true }: Occupanc
           </div>
         )}
         {routes.map((r) => (
-          <div key={r.id} className="p-3 sm:p-4 bg-card rounded-lg border border-border hover:border-primary/50 transition-colors">
+          <div key={r.id} className="p-3 sm:p-4 bg-gradient-to-br from-white to-slate-50 rounded-2xl border border-border hover:border-primary/50 transition-colors shadow-sm hover:shadow-md">
             {/* Route Header */}
             <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2 sm:gap-4 mb-3 sm:mb-4">
               <div className="flex-1">
-                <p className="font-semibold text-sm sm:text-base text-foreground">{r.name}</p>
+                <div className="flex items-center gap-2 mb-1">
+                  <span className="inline-flex rounded-full bg-primary/10 px-2.5 py-0.5 text-[11px] font-semibold text-primary">{r.name}</span>
+                </div>
                 <p className="text-xs sm:text-sm text-muted-foreground">{r.from} → {r.to}</p>
               </div>
               <div className="text-right shrink-0">
@@ -277,12 +279,13 @@ const OccupancyDisplay = ({ interactive = true, showPayButton = true }: Occupanc
               )}
               {r.vehicles.map((v, idx) => {
                 const s = v.status || 'empty';
+                const isFull = s === 'full';
                 // Highlight the first non-full vehicle as "currently filling"
                 const isActive = s !== 'full' && idx === r.vehicles.findIndex(x => x.status !== 'full');
                 const cardClass = cn(
-                  'p-2 sm:p-3 rounded-lg border-2 transition-all text-left',
+                  'p-2.5 sm:p-3 rounded-xl border-2 transition-all text-left',
                   statusColor(s),
-                  isActive ? 'ring-2 ring-offset-1 ring-green-400' : '',
+                  isActive ? 'ring-2 ring-offset-1 ring-green-400 shadow-sm' : '',
                   interactive ? 'cursor-pointer hover:shadow-sm focus:outline-none focus:ring-2 focus:ring-primary/40' : 'cursor-default'
                 );
                 const countLabel = `${v.current ?? 0} / ${v.capacity ?? 14}`;
@@ -292,12 +295,18 @@ const OccupancyDisplay = ({ interactive = true, showPayButton = true }: Occupanc
                     <button
                       type="button"
                       key={v.id}
-                      onClick={() => navigate(`/payment?${buildPaymentParams(r, v.name)}`)}
+                      onClick={() => {
+                        if (isFull) return;
+                        navigate(`/payment?${buildPaymentParams(r, v.name)}`);
+                      }}
                       className={cardClass}
+                      disabled={isFull}
                     >
                       <p className="font-mono text-xs sm:text-sm font-semibold mb-1">{v.name}</p>
+                      <p className="text-[11px] mb-1 opacity-80">{statusEmoji(s)} {statusLabel(s)}</p>
                       <p className="text-xs font-bold">{countLabel}</p>
                       {isActive && <p className="text-[10px] text-green-700 font-medium mt-0.5">● Filling</p>}
+                      {isFull && <p className="text-[10px] text-red-700 font-medium mt-0.5">Payment unavailable</p>}
                     </button>
                   );
                 }
@@ -305,6 +314,7 @@ const OccupancyDisplay = ({ interactive = true, showPayButton = true }: Occupanc
                 return (
                   <div key={v.id} className={cardClass}>
                     <p className="font-mono text-xs sm:text-sm font-semibold mb-1">{v.name}</p>
+                    <p className="text-[11px] mb-1 opacity-80">{statusEmoji(s)} {statusLabel(s)}</p>
                     <p className="text-xs font-bold">{countLabel}</p>
                     {isActive && <p className="text-[10px] text-green-700 font-medium mt-0.5">● Filling</p>}
                   </div>

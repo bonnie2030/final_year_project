@@ -104,6 +104,51 @@ class OccupancyModel {
     }
   }
 
+  // Atomically increment occupancy only if the vehicle is not yet full.
+  // Returns { updated: true, row } when incremented, or { updated: false, row } when already full.
+  // Uses a single SQL statement to avoid read-then-write race conditions between
+  // concurrent payments for the same vehicle.
+  static async incrementOccupancyIfNotFull(vehicleId, capacity) {
+    const query = `
+      INSERT INTO vehicle_occupancy (vehicle_id, current_occupancy, occupancy_status)
+      VALUES ($1, 1, CASE WHEN 1 >= $2 THEN 'full' ELSE 'available' END)
+      ON CONFLICT (vehicle_id) DO UPDATE
+        SET current_occupancy = CASE
+              WHEN vehicle_occupancy.current_occupancy < $2
+              THEN vehicle_occupancy.current_occupancy + 1
+              ELSE vehicle_occupancy.current_occupancy
+            END,
+            occupancy_status = CASE
+              WHEN vehicle_occupancy.current_occupancy + 1 >= $2
+              THEN 'full'
+              ELSE 'available'
+            END,
+            updated_at = CURRENT_TIMESTAMP
+      WHERE vehicle_occupancy.current_occupancy < $2
+      RETURNING *,
+        (xmax = 0 OR (xmax::text::int > 0 AND current_occupancy > 0)) AS was_incremented;
+    `;
+    try {
+      const result = await pool.query(query, [vehicleId, capacity]);
+      if (result.rowCount === 0) {
+        // WHERE guard fired — vehicle was already full, nothing changed
+        const current = await pool.query('SELECT * FROM vehicle_occupancy WHERE vehicle_id = $1', [vehicleId]);
+        return { updated: false, row: current.rows[0] };
+      }
+      return { updated: true, row: result.rows[0] };
+    } catch (error) {
+      throw error;
+    }
+  }
+
+  // Increment occupancy (alias used by driverController)
+  static async incrementOccupancy(vehicleId) {
+    // Determine capacity from vehicles table
+    const capResult = await pool.query('SELECT capacity FROM vehicles WHERE id = $1', [vehicleId]);
+    const capacity = Number(capResult.rows[0]?.capacity || 14);
+    return OccupancyModel.incrementOccupancyIfNotFull(vehicleId, capacity);
+  }
+
   // Delete occupancy status for a vehicle
   static async deleteOccupancy(vehicleId) {
     const query = 'DELETE FROM vehicle_occupancy WHERE vehicle_id = $1 RETURNING *;';
