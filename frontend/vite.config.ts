@@ -1,6 +1,7 @@
 import { defineConfig } from "vite";
 import fs from "fs";
 import react from "@vitejs/plugin-react-swc";
+import basicSsl from "@vitejs/plugin-basic-ssl";
 import path from "path";
 import { componentTagger } from "lovable-tagger";
 
@@ -14,7 +15,7 @@ const httpsConfig = hasCerts
       key: fs.readFileSync(keyPath),
       cert: fs.readFileSync(certPath),
     }
-  : false;
+  : true;
 
 // https://vitejs.dev/config/
 export default defineConfig(({ mode }) => {
@@ -23,7 +24,7 @@ export default defineConfig(({ mode }) => {
   
   return {
     server: {
-      host: "::",
+      host: "0.0.0.0",
       port: 8080,
       https: httpsConfig, // Automatically enabled if certs exist
       proxy: {
@@ -45,7 +46,7 @@ export default defineConfig(({ mode }) => {
         },
       },
     },
-    plugins: [react(), mode === "development" && componentTagger()].filter(Boolean),
+    plugins: [!hasCerts && basicSsl(), react(), mode === "development" && componentTagger()].filter(Boolean),
     resolve: {
       alias: {
         "@": path.resolve(__dirname, "./src"),
