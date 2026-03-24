@@ -18,7 +18,14 @@ const POPULAR_ROUTES = [
   { id: 4, name: "Route 45", from: "Eastleigh", to: "CBD", fare: 60, distance: 5.4, vehicles: 18, rating: 4.9 },
 ];
 
-const TESTIMONIALS = [
+type Testimonial = {
+  name: string;
+  role: string;
+  message: string;
+  rating: number;
+};
+
+const FALLBACK_TESTIMONIALS: Testimonial[] = [
   { name: "James Mwangi", role: "Daily Commuter", message: "MatatuConnect has made my daily commute so much easier. I know exactly when my matatu will arrive!", rating: 5 },
   { name: "Sarah Wanjiku", role: "Business Owner", message: "The cashless payment option is a game-changer. No more worrying about carrying cash!", rating: 5 },
   { name: "Peter Omondi", role: "Student", message: "Real-time occupancy tracking helps me plan my trips better. Highly recommended!", rating: 5 },
@@ -41,6 +48,13 @@ export default function Index() {
     queryFn: api.vehicles.getAll,
     retry: 1,
     staleTime: 30000,
+  });
+
+  const { data: topRatedFeedback } = useQuery({
+    queryKey: ['top-rated-feedback'],
+    queryFn: () => api.reports.getTopRated(3),
+    retry: 1,
+    staleTime: 60000,
   });
 
   // Use backend routes if available, otherwise show popular routes
@@ -77,6 +91,33 @@ export default function Index() {
         rating: r.rating ?? 4.7,
       }))
     : POPULAR_ROUTES;
+
+  const testimonials = useMemo<Testimonial[]>(() => {
+    const feedbackList = Array.isArray((topRatedFeedback as any)?.feedback)
+      ? (topRatedFeedback as any).feedback
+      : Array.isArray(topRatedFeedback)
+        ? topRatedFeedback
+        : [];
+
+    const mapped = feedbackList
+      .map((item: any) => {
+        const message = String(item.comment ?? '').trim();
+        const numericRating = Number(item.rating);
+        const rating = Number.isFinite(numericRating)
+          ? Math.min(5, Math.max(1, Math.round(numericRating)))
+          : 5;
+
+        return {
+          name: String(item.customer_name || item.name || 'Anonymous Rider'),
+          role: String(item.rider_role || 'Commuter'),
+          message,
+          rating,
+        };
+      })
+      .filter((item: Testimonial) => item.message.length > 0);
+
+    return mapped.length > 0 ? mapped.slice(0, 3) : FALLBACK_TESTIMONIALS;
+  }, [topRatedFeedback]);
 
   const buildPaymentParams = (route: any) => {
     const params = new URLSearchParams();
@@ -491,7 +532,7 @@ export default function Index() {
             </div>
 
             <div className="grid grid-cols-1 md:grid-cols-3 gap-6 sm:gap-8">
-              {TESTIMONIALS.map((testimonial, index) => (
+              {testimonials.map((testimonial, index) => (
                 <div 
                   key={index} 
                   className="bg-white/10 backdrop-blur-sm rounded-2xl p-6 border border-white/20 hover:bg-white/15 transition-colors"

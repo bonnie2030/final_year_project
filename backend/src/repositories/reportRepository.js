@@ -294,6 +294,39 @@ class ReportRepository {
   }
 
   /**
+   * Get top-rated GENERAL feedback reports for public testimonials.
+   * @param {number} limit - Max rows to return
+   * @returns {Promise<Array>} Top-rated feedback rows
+   */
+  static async getTopRatedFeedback(limit = 3) {
+    const query = `
+      SELECT
+        r.id,
+        r.rating,
+        r.comment,
+        r.created_at,
+        COALESCE(NULLIF(u.name, ''), NULLIF(u.username, ''), 'Anonymous Rider') as customer_name,
+        COALESCE(NULLIF(rt.route_name, ''), 'Commuter') as rider_role
+      FROM reports r
+      LEFT JOIN users u ON r.user_id = u.id
+      LEFT JOIN vehicles v ON r.matatu_id = v.id
+      LEFT JOIN routes rt ON v.route_id = rt.id
+      WHERE r.type = 'GENERAL'
+        AND r.rating IS NOT NULL
+        AND COALESCE(TRIM(r.comment), '') <> ''
+      ORDER BY r.rating DESC, r.created_at DESC
+      LIMIT $1
+    `;
+
+    try {
+      const result = await pool.query(query, [limit]);
+      return result.rows;
+    } catch (error) {
+      throw new Error(`Failed to get top-rated feedback: ${error.message}`);
+    }
+  }
+
+  /**
    * Get incident categories breakdown for a matatu.
    * @param {string} matatuId - UUID of the matatu
    * @returns {Promise<Array>} Array of category counts

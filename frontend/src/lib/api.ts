@@ -167,6 +167,7 @@ export const api = {
       body: JSON.stringify(data),
     }),
     getAll: () => apiFetch<any[]>('/api/reports'),
+    getTopRated: (limit = 3) => apiFetch<any>(`/api/reports/top-rated?limit=${limit}`),
   },
 
   // Admin APIs

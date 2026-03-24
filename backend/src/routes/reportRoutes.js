@@ -13,6 +13,13 @@ const router = express.Router();
 router.post('/', ReportController.createReport);
 
 /**
+ * GET /api/reports/top-rated
+ * Get top-rated GENERAL feedback for homepage testimonials
+ * Query: limit
+ */
+router.get('/top-rated', ReportController.getTopRatedFeedback);
+
+/**
  * GET /api/reports/:reportId
  * Get a specific report by ID
  */

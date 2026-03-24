@@ -827,45 +827,45 @@ const AdminDashboard = () => {
           {/* Tabs - Enhanced Design */}
           <div className="bg-gradient-to-br from-white to-slate-50 rounded-2xl shadow-2xl border border-gray-200 overflow-hidden backdrop-blur-sm">
             <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
-              <div className="bg-gradient-to-r from-slate-50 via-blue-50 to-slate-50 border-b-2 border-gray-200 p-4 overflow-x-auto">
-                <TabsList className="inline-flex gap-2 h-auto bg-transparent p-0 min-w-max">
-                  <TabsTrigger value="feedback" className="px-5 py-3 rounded-lg text-sm font-semibold transition-all duration-200 flex items-center gap-2 whitespace-nowrap border-2 border-gray-200 hover:border-blue-300 hover:bg-blue-50 data-[state=active]:bg-gradient-to-r data-[state=active]:from-blue-500 data-[state=active]:to-blue-600 data-[state=active]:text-white data-[state=active]:shadow-lg data-[state=active]:border-0">
+              <div className="bg-gradient-to-r from-slate-50 via-blue-50 to-slate-50 border-b-2 border-gray-200 p-3 sm:p-4 overflow-x-auto">
+                <TabsList className="min-w-max md:min-w-0 md:w-full !inline-flex md:!flex md:flex-nowrap md:justify-between gap-2 md:gap-1 h-auto bg-transparent px-1 py-0">
+                  <TabsTrigger value="feedback" className="px-3 py-2.5 rounded-lg text-xs sm:text-sm font-semibold transition-all duration-200 flex items-center gap-1.5 whitespace-nowrap md:flex-1 md:min-w-0 md:justify-center border border-gray-200 hover:border-blue-300 hover:bg-blue-50 data-[state=active]:bg-gradient-to-r data-[state=active]:from-blue-500 data-[state=active]:to-blue-600 data-[state=active]:text-white data-[state=active]:shadow-lg data-[state=active]:border-0">
                     <MessageSquare className="h-4 w-4" />
                     Feedback
                   </TabsTrigger>
-                  <TabsTrigger value="ntsa" className="px-5 py-3 rounded-lg text-sm font-semibold transition-all duration-200 flex items-center gap-2 whitespace-nowrap border-2 border-gray-200 hover:border-red-300 hover:bg-red-50 data-[state=active]:bg-gradient-to-r data-[state=active]:from-red-500 data-[state=active]:to-red-600 data-[state=active]:text-white data-[state=active]:shadow-lg data-[state=active]:border-0">
+                  <TabsTrigger value="ntsa" className="px-3 py-2.5 rounded-lg text-xs sm:text-sm font-semibold transition-all duration-200 flex items-center gap-1.5 whitespace-nowrap md:flex-1 md:min-w-0 md:justify-center border border-gray-200 hover:border-red-300 hover:bg-red-50 data-[state=active]:bg-gradient-to-r data-[state=active]:from-red-500 data-[state=active]:to-red-600 data-[state=active]:text-white data-[state=active]:shadow-lg data-[state=active]:border-0">
                     <Shield className="h-4 w-4" />
                     NTSA
                   </TabsTrigger>
-                  <TabsTrigger value="payments" className="px-5 py-3 rounded-lg text-sm font-semibold transition-all duration-200 flex items-center gap-2 whitespace-nowrap border-2 border-gray-200 hover:border-green-300 hover:bg-green-50 data-[state=active]:bg-gradient-to-r data-[state=active]:from-green-500 data-[state=active]:to-emerald-600 data-[state=active]:text-white data-[state=active]:shadow-lg data-[state=active]:border-0">
+                  <TabsTrigger value="payments" className="px-3 py-2.5 rounded-lg text-xs sm:text-sm font-semibold transition-all duration-200 flex items-center gap-1.5 whitespace-nowrap md:flex-1 md:min-w-0 md:justify-center border border-gray-200 hover:border-green-300 hover:bg-green-50 data-[state=active]:bg-gradient-to-r data-[state=active]:from-green-500 data-[state=active]:to-emerald-600 data-[state=active]:text-white data-[state=active]:shadow-lg data-[state=active]:border-0">
                     <CreditCard className="h-4 w-4" />
                     Payments
                   </TabsTrigger>
-                  <TabsTrigger value="drivers" className="px-5 py-3 rounded-lg text-sm font-semibold transition-all duration-200 flex items-center gap-2 whitespace-nowrap border-2 border-gray-200 hover:border-indigo-300 hover:bg-indigo-50 data-[state=active]:bg-gradient-to-r data-[state=active]:from-indigo-500 data-[state=active]:to-violet-500 data-[state=active]:text-white data-[state=active]:shadow-lg data-[state=active]:border-0">
+                  <TabsTrigger value="drivers" className="px-3 py-2.5 rounded-lg text-xs sm:text-sm font-semibold transition-all duration-200 flex items-center gap-1.5 whitespace-nowrap md:flex-1 md:min-w-0 md:justify-center border border-gray-200 hover:border-indigo-300 hover:bg-indigo-50 data-[state=active]:bg-gradient-to-r data-[state=active]:from-indigo-500 data-[state=active]:to-violet-500 data-[state=active]:text-white data-[state=active]:shadow-lg data-[state=active]:border-0">
                     <Users className="h-4 w-4" />
                     Drivers
                   </TabsTrigger>
-                  <TabsTrigger value="vehicles" className="px-5 py-3 rounded-lg text-sm font-semibold transition-all duration-200 flex items-center gap-2 whitespace-nowrap border-2 border-gray-200 hover:border-cyan-300 hover:bg-cyan-50 data-[state=active]:bg-gradient-to-r data-[state=active]:from-cyan-500 data-[state=active]:to-blue-500 data-[state=active]:text-white data-[state=active]:shadow-lg data-[state=active]:border-0">
+                  <TabsTrigger value="vehicles" className="px-3 py-2.5 rounded-lg text-xs sm:text-sm font-semibold transition-all duration-200 flex items-center gap-1.5 whitespace-nowrap md:flex-1 md:min-w-0 md:justify-center border border-gray-200 hover:border-cyan-300 hover:bg-cyan-50 data-[state=active]:bg-gradient-to-r data-[state=active]:from-cyan-500 data-[state=active]:to-blue-500 data-[state=active]:text-white data-[state=active]:shadow-lg data-[state=active]:border-0">
                     <Truck className="h-4 w-4" />
                     Vehicles
                   </TabsTrigger>
-                  <TabsTrigger value="routes" className="px-5 py-3 rounded-lg text-sm font-semibold transition-all duration-200 flex items-center gap-2 whitespace-nowrap border-2 border-gray-200 hover:border-purple-300 hover:bg-purple-50 data-[state=active]:bg-gradient-to-r data-[state=active]:from-purple-500 data-[state=active]:to-pink-500 data-[state=active]:text-white data-[state=active]:shadow-lg data-[state=active]:border-0">
+                  <TabsTrigger value="routes" className="px-3 py-2.5 rounded-lg text-xs sm:text-sm font-semibold transition-all duration-200 flex items-center gap-1.5 whitespace-nowrap md:flex-1 md:min-w-0 md:justify-center border border-gray-200 hover:border-purple-300 hover:bg-purple-50 data-[state=active]:bg-gradient-to-r data-[state=active]:from-purple-500 data-[state=active]:to-pink-500 data-[state=active]:text-white data-[state=active]:shadow-lg data-[state=active]:border-0">
                     <Trello className="h-4 w-4" />
                     Routes
                   </TabsTrigger>
-                  <TabsTrigger value="occupancy" className="px-5 py-3 rounded-lg text-sm font-semibold transition-all duration-200 flex items-center gap-2 whitespace-nowrap border-2 border-gray-200 hover:border-amber-300 hover:bg-amber-50 data-[state=active]:bg-gradient-to-r data-[state=active]:from-amber-500 data-[state=active]:to-orange-500 data-[state=active]:text-white data-[state=active]:shadow-lg data-[state=active]:border-0">
+                  <TabsTrigger value="occupancy" className="px-3 py-2.5 rounded-lg text-xs sm:text-sm font-semibold transition-all duration-200 flex items-center gap-1.5 whitespace-nowrap md:flex-1 md:min-w-0 md:justify-center border border-gray-200 hover:border-amber-300 hover:bg-amber-50 data-[state=active]:bg-gradient-to-r data-[state=active]:from-amber-500 data-[state=active]:to-orange-500 data-[state=active]:text-white data-[state=active]:shadow-lg data-[state=active]:border-0">
                     <Gauge className="h-4 w-4" />
                     Occupancy
                   </TabsTrigger>
-                  <TabsTrigger value="revenue" className="px-5 py-3 rounded-lg text-sm font-semibold transition-all duration-200 flex items-center gap-2 whitespace-nowrap border-2 border-gray-200 hover:border-emerald-300 hover:bg-emerald-50 data-[state=active]:bg-gradient-to-r data-[state=active]:from-emerald-500 data-[state=active]:to-green-600 data-[state=active]:text-white data-[state=active]:shadow-lg data-[state=active]:border-0">
+                  <TabsTrigger value="revenue" className="px-3 py-2.5 rounded-lg text-xs sm:text-sm font-semibold transition-all duration-200 flex items-center gap-1.5 whitespace-nowrap md:flex-1 md:min-w-0 md:justify-center border border-gray-200 hover:border-emerald-300 hover:bg-emerald-50 data-[state=active]:bg-gradient-to-r data-[state=active]:from-emerald-500 data-[state=active]:to-green-600 data-[state=active]:text-white data-[state=active]:shadow-lg data-[state=active]:border-0">
                     <DollarSign className="h-4 w-4" />
                     Revenue
                   </TabsTrigger>
-                  <TabsTrigger value="whatsapp" className="px-5 py-3 rounded-lg text-sm font-semibold transition-all duration-200 flex items-center gap-2 whitespace-nowrap border-2 border-gray-200 hover:border-teal-300 hover:bg-teal-50 data-[state=active]:bg-gradient-to-r data-[state=active]:from-emerald-500 data-[state=active]:to-teal-600 data-[state=active]:text-white data-[state=active]:shadow-lg data-[state=active]:border-0">
+                  <TabsTrigger value="whatsapp" className="px-3 py-2.5 rounded-lg text-xs sm:text-sm font-semibold transition-all duration-200 flex items-center gap-1.5 whitespace-nowrap md:flex-1 md:min-w-0 md:justify-center border border-gray-200 hover:border-teal-300 hover:bg-teal-50 data-[state=active]:bg-gradient-to-r data-[state=active]:from-emerald-500 data-[state=active]:to-teal-600 data-[state=active]:text-white data-[state=active]:shadow-lg data-[state=active]:border-0">
                     <MessageSquare className="h-4 w-4" />
                     WhatsApp
                   </TabsTrigger>
-                  <TabsTrigger value="settings" className="px-5 py-3 rounded-lg text-sm font-semibold transition-all duration-200 flex items-center gap-2 whitespace-nowrap border-2 border-gray-200 hover:border-gray-300 hover:bg-gray-50 data-[state=active]:bg-gradient-to-r data-[state=active]:from-gray-600 data-[state=active]:to-gray-700 data-[state=active]:text-white data-[state=active]:shadow-lg data-[state=active]:border-0">
+                  <TabsTrigger value="settings" className="px-3 py-2.5 rounded-lg text-xs sm:text-sm font-semibold transition-all duration-200 flex items-center gap-1.5 whitespace-nowrap md:flex-1 md:min-w-0 md:justify-center border border-gray-200 hover:border-gray-300 hover:bg-gray-50 data-[state=active]:bg-gradient-to-r data-[state=active]:from-gray-600 data-[state=active]:to-gray-700 data-[state=active]:text-white data-[state=active]:shadow-lg data-[state=active]:border-0">
                     <Settings className="h-4 w-4" />
                     Settings
                   </TabsTrigger>
