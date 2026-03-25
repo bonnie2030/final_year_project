@@ -1,10 +1,10 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { CreditCard, DollarSign, Loader2, Phone, Smartphone } from 'lucide-react';
+import { CreditCard, DollarSign, Loader2, Phone, Smartphone, History } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
 
 const API_BASE = import.meta.env.VITE_API_URL || '';
@@ -25,13 +25,55 @@ export default function PaymentDialog({
   vehicleId,
   routeId,
   routeName = 'Standard Route',
-  amount = 50,
+  amount: initialAmount = 50,
   onPaymentSuccess
 }: PaymentDialogProps) {
   const [paymentMethod, setPaymentMethod] = useState<'manual' | 'mpesa'>('manual');
   const [loading, setLoading] = useState(false);
   const [phoneNumber, setPhoneNumber] = useState('');
+  const [distance, setDistance] = useState<number>(0);
+  const [adjustedAmount, setAdjustedAmount] = useState<number>(initialAmount);
+  const [previousPhones, setPreviousPhones] = useState<string[]>([]);
+  const [loadingPhones, setLoadingPhones] = useState(false);
+  const [showPhoneHistory, setShowPhoneHistory] = useState(false);
   const { toast } = useToast();
+
+  // Calculate amount based on distance: 50 KES base + 5 KES per km
+  const calculateAmountFromDistance = (km: number) => {
+    const calculated = initialAmount + (km * 5);
+    setAdjustedAmount(Math.max(initialAmount, calculated));
+    return Math.max(initialAmount, calculated);
+  };
+
+  // Fetch previous M-Pesa phone numbers
+  const fetchPreviousPhones = async () => {
+    setLoadingPhones(true);
+    try {
+      const token = localStorage.getItem('token');
+      const res = await fetch(API_BASE + '/api/payments/previous-phones', {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      
+      if (res.ok) {
+        const data = await res.json();
+        setPreviousPhones(data.phones || []);
+        setShowPhoneHistory(true);
+      }
+    } catch (error) {
+      console.error('Error fetching previous phones:', error);
+    } finally {
+      setLoadingPhones(false);
+    }
+  };
+
+  const selectPreviousPhone = (phone: string) => {
+    setPhoneNumber(phone);
+    setShowPhoneHistory(false);
+  };
+
+  useEffect(() => {
+    setAdjustedAmount(initialAmount);
+  }, [initialAmount]);
 
   const handleManualPayment = async () => {
     setLoading(true);
@@ -47,7 +89,8 @@ export default function PaymentDialog({
         },
         body: JSON.stringify({
           routeId: routeId || 1,
-          amount,
+          amount: adjustedAmount,
+          distance,
           phoneNumber: 'MANUAL-CASH',
           vehicle: null, // Let backend auto-assign vehicle
           vehicleId: vehicleId
@@ -59,7 +102,7 @@ export default function PaymentDialog({
       if (res.ok) {
         toast({
           title: 'Payment Recorded',
-          description: `Manual payment of KES ${amount} recorded successfully`,
+          description: `Manual payment of KES ${adjustedAmount} recorded successfully`,
           duration: 3000
         });
         
@@ -117,7 +160,8 @@ export default function PaymentDialog({
         },
         body: JSON.stringify({
           routeId: routeId || 1,
-          amount,
+          amount: adjustedAmount,
+          distance,
           phoneNumber: normalizedPhone,
           vehicleId: vehicleId
         })
@@ -137,7 +181,7 @@ export default function PaymentDialog({
         setTimeout(() => {
           toast({
             title: 'Payment Successful',
-            description: `M-Pesa payment of KES ${amount} completed`,
+            description: `M-Pesa payment of KES ${adjustedAmount} completed`,
             duration: 3000
           });
           onPaymentSuccess();
@@ -181,8 +225,11 @@ export default function PaymentDialog({
 
   const resetForm = () => {
     setPhoneNumber('');
+    setDistance(0);
+    setAdjustedAmount(initialAmount);
     setPaymentMethod('manual');
     setLoading(false);
+    setShowPhoneHistory(false);
   };
 
   const handleCancel = () => {
@@ -194,7 +241,7 @@ export default function PaymentDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-[500px]">
+      <DialogContent className="sm:max-w-[500px] max-h-[90vh] overflow-y-auto">
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
             <CreditCard className="h-5 w-5 text-green-600" />
@@ -204,6 +251,59 @@ export default function PaymentDialog({
             Collect payment for the passenger boarding {routeName}
           </DialogDescription>
         </DialogHeader>
+
+        {/* Distance & Amount Adjustment Section */}
+        <div className="space-y-4 border-b pb-4">
+          <div>
+            <Label htmlFor="distance">Distance from main stage (km)</Label>
+            <Input
+              id="distance"
+              type="number"
+              min="0"
+              step="0.5"
+              value={distance}
+              onChange={(e) => {
+                const km = parseFloat(e.target.value) || 0;
+                setDistance(km);
+                calculateAmountFromDistance(km);
+              }}
+              placeholder="0"
+              disabled={loading}
+              className="mt-2"
+            />
+            <p className="text-xs text-gray-500 mt-1">
+              Base fare: KES {initialAmount} + KES 5 per km
+            </p>
+          </div>
+
+          <div className="rounded-lg border border-amber-200 bg-amber-50 p-4">
+            <div className="flex items-center justify-between">
+              <div>
+                <p className="text-sm font-medium text-amber-900">Adjusted Amount</p>
+                <p className="text-2xl font-bold text-amber-700">KES {adjustedAmount}</p>
+              </div>
+              {distance > 0 && (
+                <div className="text-sm text-amber-700">
+                  +KES {(distance * 5).toFixed(0)} for {distance} km
+                </div>
+              )}
+            </div>
+          </div>
+
+          <div>
+            <Label>Manually adjust amount (optional)</Label>
+            <Input
+              type="number"
+              min={initialAmount}
+              step="10"
+              value={adjustedAmount}
+              onChange={(e) => setAdjustedAmount(Math.max(initialAmount, parseFloat(e.target.value) || initialAmount))}
+              placeholder={String(initialAmount)}
+              disabled={loading}
+              className="mt-2"
+            />
+          </div>
+        </div>
 
         <Tabs value={paymentMethod} onValueChange={(v) => setPaymentMethod(v as 'manual' | 'mpesa')} className="w-full">
           <TabsList className="grid w-full grid-cols-2">
@@ -225,18 +325,48 @@ export default function PaymentDialog({
                 </div>
                 <div>
                   <p className="font-semibold text-blue-900">Cash Payment</p>
-                  <p className="text-2xl font-bold text-blue-700">KES {amount}</p>
+                  <p className="text-2xl font-bold text-blue-700">KES {adjustedAmount}</p>
                 </div>
               </div>
             </div>
             <p className="text-sm text-gray-600">
-              Record that the passenger paid <strong>KES {amount}</strong> in cash. Click "Record Payment" to confirm.
+              Record that the passenger paid <strong>KES {adjustedAmount}</strong> in cash. Click "Record Payment" to confirm.
             </p>
           </TabsContent>
 
           <TabsContent value="mpesa" className="space-y-4">
             <div className="space-y-2">
-              <Label htmlFor="phone">Passenger Phone Number</Label>
+              <div className="flex justify-between items-center">
+                <Label htmlFor="phone">Passenger Phone Number</Label>
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  onClick={fetchPreviousPhones}
+                  disabled={loadingPhones || loading}
+                  className="flex items-center gap-1 text-xs"
+                >
+                  <History className="h-3 w-3" />
+                  {loadingPhones ? 'Loading...' : 'Use Previous'}
+                </Button>
+              </div>
+
+              {showPhoneHistory && previousPhones.length > 0 && (
+                <div className="border rounded-md p-2 bg-gray-50 max-h-32 overflow-y-auto">
+                  <p className="text-xs font-semibold text-gray-700 mb-2">Recent phone numbers:</p>
+                  {previousPhones.map((phone, idx) => (
+                    <button
+                      key={idx}
+                      type="button"
+                      onClick={() => selectPreviousPhone(phone)}
+                      className="block w-full text-left px-2 py-1 text-sm hover:bg-blue-100 rounded"
+                    >
+                      {phone}
+                    </button>
+                  ))}
+                </div>
+              )}
+
               <div className="relative">
                 <Phone className="absolute left-3 top-3 h-4 w-4 text-gray-400" />
                 <Input
@@ -261,12 +391,12 @@ export default function PaymentDialog({
                 </div>
                 <div>
                   <p className="font-semibold text-green-900">M-Pesa Payment</p>
-                  <p className="text-2xl font-bold text-green-700">KES {amount}</p>
+                  <p className="text-2xl font-bold text-green-700">KES {adjustedAmount}</p>
                 </div>
               </div>
             </div>
             <p className="text-sm text-gray-600">
-              The passenger will receive an M-Pesa prompt on their phone to pay <strong>KES {amount}</strong>.
+              The passenger will receive an M-Pesa prompt on their phone to pay <strong>KES {adjustedAmount}</strong>.
             </p>
           </TabsContent>
         </Tabs>

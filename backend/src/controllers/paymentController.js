@@ -700,6 +700,26 @@ To get your ticket via WhatsApp:
     }
   }
 
+  // Get previous M-Pesa phone numbers for current user
+  static async getPreviousPhoneNumbers(req, res) {
+    try {
+      const userId = req.userId;
+      if (!userId) {
+        return res.status(401).json({ message: 'User not authenticated' });
+      }
+
+      const phones = await PaymentModel.getPreviousPhoneNumbersByUserId(userId, 10);
+      
+      res.status(200).json({
+        success: true,
+        phones: phones || []
+      });
+    } catch (error) {
+      console.error('Error fetching previous phones:', error);
+      res.status(500).json({ message: 'Failed to fetch previous phone numbers', error: error.message });
+    }
+  }
+
   // M-Pesa STK push callback (called by Safaricom)
   static async mpesaCallback(req, res) {
     try {
@@ -824,7 +844,7 @@ To get your ticket via WhatsApp:
     try {
       const io = req.app.get('io') || null;
       const userId = req.userId || null;
-      const { routeId, amount, phoneNumber, vehicle, vehicleNumber } = req.body;
+      const { routeId, amount, distance = 0, phoneNumber, vehicle, vehicleNumber } = req.body;
 
       // Validate required fields
       if (!routeId || !amount || !phoneNumber) {
@@ -872,8 +892,8 @@ To get your ticket via WhatsApp:
         }
       }
 
-      // Create payment record
-      const payment = await PaymentModel.initiatePayment(userId, routeId, amount, phoneNumber, vehicleId);
+      // Create payment record with distance
+      const payment = await PaymentModel.initiatePayment(userId, routeId, amount, phoneNumber, vehicleId, distance);
 
       // Simulate M-Pesa STK Push (no real funds)
       // In real scenario, this would trigger an actual M-Pesa STK prompt
