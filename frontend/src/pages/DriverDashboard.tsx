@@ -5,6 +5,7 @@ import { useToast } from '@/hooks/use-toast';
 import Header from '@/components/Header';
 import { AlertCircle, CheckCircle, Circle, CreditCard, LogOut, Mail, MapPin, Minus, Navigation, Phone, Plus, Truck } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
+import PaymentDialog from '@/components/PaymentDialog';
 
 const API_BASE = import.meta.env.VITE_API_URL || '';
 const socket = API_BASE ? io(API_BASE) : io(); // fall back to same host
@@ -32,6 +33,10 @@ export default function DriverDashboard() {
   const adminIdRef = useRef<number | null>(null);
   const vehicleIdRef = useRef<number | null>(null);
   const vehicleRegRef = useRef<string>('');
+  
+  // Payment dialog state
+  const [showPaymentDialog, setShowPaymentDialog] = useState(false);
+  const [paymentAmount, setPaymentAmount] = useState(50);
 
   const normalizePlate = (value: any) =>
     String(value || '')
@@ -464,6 +469,14 @@ export default function DriverDashboard() {
 
   const adjustOccupancy = async (action: 'increment' | 'decrement' | 'set', value?: number) => {
     if (!driver?.assigned_vehicle_id) return;
+    
+    // If incrementing (adding passenger), show payment dialog first
+    if (action === 'increment') {
+      setShowPaymentDialog(true);
+      return;
+    }
+    
+    // For decrement or set, proceed directly
     try {
       const token = localStorage.getItem('token');
       const body: any = { action };
@@ -475,6 +488,37 @@ export default function DriverDashboard() {
         if (data.occupancy) setDriverOccupancy(data.occupancy);
         const nextValue = data?.trip?.current_occupancy ?? data?.occupancy?.current_occupancy ?? 0;
         toast({ title: 'Occupancy updated', description: `Now ${nextValue} passengers` });
+      } else {
+        toast({ title: 'Failed', description: data.message || 'Could not update occupancy' });
+      }
+    } catch (err: any) {
+      toast({ title: 'Error', description: err.message || 'Network error' });
+    }
+  };
+  
+  const handlePaymentSuccess = async () => {
+    // Payment was successful, now increment occupancy
+    try {
+      const token = localStorage.getItem('token');
+      const body = { action: 'increment' };
+      const res = await fetch(API_BASE + `/api/drivers/me/occupancy`, { 
+        method: 'POST', 
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` }, 
+        body: JSON.stringify(body) 
+      });
+      const data = await res.json();
+      if (res.ok) {
+        if (data.trip) setTrip(data.trip);
+        if (data.occupancy) setDriverOccupancy(data.occupancy);
+        const nextValue = data?.trip?.current_occupancy ?? data?.occupancy?.current_occupancy ?? 0;
+        
+        // Refresh tickets to show new payment
+        fetchVehicleTickets();
+        
+        toast({ 
+          title: 'Passenger Added', 
+          description: `Payment recorded. Now ${nextValue} passengers onboard` 
+        });
       } else {
         toast({ title: 'Failed', description: data.message || 'Could not update occupancy' });
       }
@@ -891,6 +935,19 @@ export default function DriverDashboard() {
           <span className="text-slate-500">Ride updates, location sharing and admin support in one place.</span>
         </div>
       </footer>
+
+      {/* Payment Dialog */}
+      {driver?.assigned_vehicle_id && (
+        <PaymentDialog
+          open={showPaymentDialog}
+          onOpenChange={setShowPaymentDialog}
+          vehicleId={driver.assigned_vehicle_id}
+          routeId={trip?.route_id}
+          routeName={trip?.route_name || 'Standard Route'}
+          amount={paymentAmount}
+          onPaymentSuccess={handlePaymentSuccess}
+        />
+      )}
 
     </div>
   );

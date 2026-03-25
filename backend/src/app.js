@@ -31,14 +31,49 @@ app.set('trust proxy', 1);
 
 // Middleware
 app.use(helmet());
-const allowedOrigins = (process.env.CORS_ORIGIN || '*').split(',').map(o => o.trim());
+
+// CORS Configuration - Smart private network detection for mobile/local network access
+const corsOriginSetting = (process.env.CORS_ORIGIN || 'auto').trim();
+const allowedOrigins = corsOriginSetting === 'auto' ? [] : corsOriginSetting.split(',').map(o => o.trim());
+
+// Private network IP patterns (RFC 1918 + localhost)
+const privateNetworkPatterns = [
+  /^https?:\/\/localhost(:\d+)?$/,           // localhost
+  /^https?:\/\/127\.0\.0\.1(:\d+)?$/,        // loopback
+  /^https?:\/\/192\.168\.\d{1,3}\.\d{1,3}(:\d+)?$/,  // 192.168.x.x
+  /^https?:\/\/10\.\d{1,3}\.\d{1,3}\.\d{1,3}(:\d+)?$/,  // 10.x.x.x
+  /^https?:\/\/172\.(1[6-9]|2[0-9]|3[0-1])\.\d{1,3}\.\d{1,3}(:\d+)?$/,  // 172.16-31.x.x
+];
+
 app.use(cors({
   origin: (origin, callback) => {
-    if (!origin || allowedOrigins.includes('*') || allowedOrigins.includes(origin)) {
-      callback(null, true);
-    } else {
-      callback(new Error('Not allowed by CORS: ' + origin));
+    // Allow requests with no origin (mobile apps, Postman, curl, etc.)
+    if (!origin) {
+      return callback(null, true);
     }
+    
+    // Allow all origins if wildcard is explicitly set
+    if (allowedOrigins.includes('*')) {
+      return callback(null, true);
+    }
+    
+    // Allow if explicitly listed in CORS_ORIGIN
+    if (allowedOrigins.includes(origin)) {
+      return callback(null, true);
+    }
+    
+    // In development with 'auto' mode: allow private network IPs only
+    if ((process.env.NODE_ENV === 'development' || process.env.NODE_ENV === 'dev') && corsOriginSetting === 'auto') {
+      const isPrivateNetwork = privateNetworkPatterns.some(pattern => pattern.test(origin));
+      if (isPrivateNetwork) {
+        console.log(`[CORS] Auto-allowed private network origin: ${origin}`);
+        return callback(null, true);
+      }
+    }
+    
+    // Reject all others with clear error message
+    console.warn(`[CORS] Blocked origin: ${origin}`);
+    callback(new Error('Not allowed by CORS: ' + origin));
   },
   credentials: true,
 }));
