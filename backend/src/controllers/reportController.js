@@ -14,29 +14,14 @@ class ReportController {
     try {
       let { matatuId, plateNumber, reportType, type, category, rating, comment, details, userId, ntsaPriority, ntsaCategory } = req.body;
 
-      console.log('[ReportController.createReport] Received payload:', JSON.stringify({
-        matatuId,
-        plateNumber,
-        reportType,
-        type,
-        category,
-        rating,
-        comment,
-        details,
-        userId,
-      }, null, 2));
-
       // If plateNumber provided instead of matatuId, look up the vehicle
       if (!matatuId && plateNumber) {
-        console.log(`[ReportController.createReport] Looking up vehicle by registration: ${plateNumber}`);
         const vehicle = await VehicleModel.getVehicleByRegistration(plateNumber);
         if (!vehicle) {
-          console.log(`[ReportController.createReport] Vehicle not found: ${plateNumber}`);
           return res.status(404).json({
             message: `Vehicle with registration ${plateNumber} not found`,
           });
         }
-        console.log(`[ReportController.createReport] Vehicle found: ID=${vehicle.id}, Registration=${vehicle.registration_number}`);
         matatuId = vehicle.id;
       }
 
@@ -48,22 +33,10 @@ class ReportController {
 
       // Basic validation
       if (!matatuId || !reportType) {
-        console.log('[ReportController.createReport] Validation failed: missing matatuId or reportType');
         return res.status(400).json({
           message: 'Missing required fields: matatuId (or plateNumber), reportType (or type)',
         });
       }
-
-      console.log('[ReportController.createReport] Calling service with:', JSON.stringify({
-        matatuId,
-        reportType,
-        category,
-        rating,
-        comment: finalComment,
-        userId,
-        ntsaPriority,
-        ntsaCategory,
-      }, null, 2));
 
       // Call service
       const result = await ReportService.createReport({
@@ -76,8 +49,6 @@ class ReportController {
         ntsaPriority,
         ntsaCategory,
       });
-
-      console.log('[ReportController.createReport] Service returned:', JSON.stringify(result, null, 2));
 
       res.status(201).json({
         message: 'Report submitted successfully',

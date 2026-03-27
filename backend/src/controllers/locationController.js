@@ -16,9 +16,9 @@ exports.updateLocation = async (req, res) => {
       return res.status(401).json({ message: 'Unauthorized' });
     }
 
-    // Get driver's assigned vehicle
+    // Pull driver identity for live-map payload and assigned vehicle guardrails.
     const driverResult = await db.query(
-      'SELECT id, name, email, assigned_vehicle_id FROM users WHERE id = $1 AND role = $2',
+      'SELECT id, name, assigned_vehicle_id FROM users WHERE id = $1 AND role = $2',
       [userId, 'driver']
     );
 

@@ -45,6 +45,7 @@ class RouteModel {
   }
 
   static async getAllRoutes() {
+    // vehicle_count reflects non-full active vehicles currently usable on each route.
     const query = `
       SELECT
         r.*,
@@ -148,6 +149,7 @@ class RouteModel {
   }
 
   static async deleteRoute(id) {
+    // Soft-delete preserves historical references in trips, payments, and reports.
     const query = `
       UPDATE routes
       SET status = 'inactive', updated_at = CURRENT_TIMESTAMP

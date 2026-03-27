@@ -1,5 +1,6 @@
 const express = require('express');
 const router = express.Router();
+const twilio = require('twilio');
 const MessageModel = require('../models/messageModel');
 const WhatsappService = require('../services/whatsappService');
 const { authMiddleware, authorizeRoles } = require('../middlewares/authMiddleware');
@@ -7,7 +8,8 @@ const { authMiddleware, authorizeRoles } = require('../middlewares/authMiddlewar
 const adminOnly = [authMiddleware, authorizeRoles(['admin'])];
 
 // WhatsApp webhook token for verification
-const WHATSAPP_WEBHOOK_TOKEN = process.env.WHATSAPP_WEBHOOK_TOKEN || 'matatuconnect-verify-token-2024';
+const WHATSAPP_WEBHOOK_TOKEN = process.env.WHATSAPP_WEBHOOK_TOKEN;
+const VALIDATE_TWILIO_SIGNATURE = String(process.env.WHATSAPP_VALIDATE_TWILIO_SIGNATURE || 'false').toLowerCase() === 'true';
 
 // Store incoming messages for monitoring
 let incomingMessages = [];
@@ -23,14 +25,15 @@ const normalizePhoneForStorage = (phone) => {
  * Webhook verification endpoint - WhatsApp calls this to verify the webhook URL
  */
 router.get('/webhook', (req, res) => {
+  if (!WHATSAPP_WEBHOOK_TOKEN) {
+    return res.status(503).json({ error: 'Webhook verification token is not configured' });
+  }
+
   const mode = req.query['hub.mode'];
   const token = req.query['hub.verify_token'];
   const challenge = req.query['hub.challenge'];
 
-  console.log(`[WhatsApp] Webhook verification request:`, { mode, token: token ? '***' : 'missing' });
-
   if (mode === 'subscribe' && token === WHATSAPP_WEBHOOK_TOKEN) {
-    console.log('✓ WhatsApp webhook verified successfully');
     res.status(200).send(challenge);
   } else {
     console.error('✗ WhatsApp webhook verification failed - invalid token');
@@ -43,12 +46,28 @@ router.get('/webhook', (req, res) => {
  * Receives incoming WhatsApp messages from Twilio
  */
 router.post('/webhook', async (req, res) => {
+  // Optional strict validation for production reverse-proxy deployments.
+  if (VALIDATE_TWILIO_SIGNATURE) {
+    const authToken = process.env.TWILIO_AUTH_TOKEN;
+    const signature = req.headers['x-twilio-signature'];
+    const webhookUrl = `${req.protocol}://${req.get('host')}${req.originalUrl}`;
+
+    if (!authToken) {
+      return res.status(500).json({ error: 'Twilio auth token not configured for signature validation' });
+    }
+
+    const isValid = twilio.validateRequest(authToken, signature, webhookUrl, req.body || {});
+    if (!isValid) {
+      return res.status(403).json({ error: 'Invalid webhook signature' });
+    }
+  }
+
   const body = req.body;
 
   // Always acknowledge receipt immediately (Twilio expects empty 200)
   res.status(200).send();
 
-  console.log('[WhatsApp] Twilio webhook received:', JSON.stringify(body, null, 2));
+  // Keep webhook processing resilient and non-blocking for Twilio retries.
 
   // Twilio sends messages in req.body with these fields:
   // MessageSid, From, To, Body, NumMedia, etc.
@@ -71,7 +90,7 @@ router.post('/webhook', async (req, res) => {
       incomingMessages = incomingMessages.slice(-1000); // Keep last 1000 messages
     }
 
-    console.log('✓ Twilio message stored:', messageContent);
+    // Message is persisted for admin inbox and diagnostics.
 
     const messageText = (body.Body || '').toLowerCase().trim();
     const userPhone = body.From.replace('whatsapp:', ''); // Remove whatsapp: prefix
@@ -150,7 +169,6 @@ Type "menu" for options.`;
       }
 
       await WhatsappService.sendMessage(userPhone, responseMessage, responseType);
-      console.log('✓ Auto-response sent to:', userPhone);
 
       const menuOptions = [
         { title: 'Feedback' },
@@ -165,13 +183,9 @@ Type "menu" for options.`;
         menuOptions,
         'post_interaction_menu'
       );
-      console.log('✓ Post-interaction menu sent to:', userPhone);
     } catch (error) {
       console.error('✗ Auto-response failed:', error.message);
     }
-
-    // TODO: Add logic here to route messages to admin/driver chat
-    // Example: parse body.Body for commands, match body.From to registered users
   } else if (body.MessageStatus) {
     // Handle status callbacks (sent, delivered, read, failed)
     const statusMap = {
@@ -180,7 +194,7 @@ Type "menu" for options.`;
       read: '✓✓ Message read',
       failed: '✗ Message failed'
     };
-    console.log(`[WhatsApp] ${statusMap[body.MessageStatus] || body.MessageStatus} - SID: ${body.MessageSid}`);
+    console.log(`[WhatsApp] ${statusMap[body.MessageStatus] || body.MessageStatus}`);
   }
 });
 
@@ -188,7 +202,7 @@ Type "menu" for options.`;
  * GET /api/whatsapp/messages
  * Get incoming messages (for monitoring/debugging)
  */
-router.get('/messages', (req, res) => {
+router.get('/messages', adminOnly, (req, res) => {
   const limit = parseInt(req.query.limit) || 50;
   const messages = incomingMessages.slice(-limit);
 
@@ -203,7 +217,7 @@ router.get('/messages', (req, res) => {
  * GET /api/whatsapp/status
  * Check WhatsApp service status
  */
-router.get('/status', (req, res) => {
+router.get('/status', adminOnly, (req, res) => {
   const configured = !!(process.env.TWILIO_ACCOUNT_SID && process.env.TWILIO_AUTH_TOKEN && process.env.TWILIO_WHATSAPP_NUMBER);
 
   res.json({
@@ -235,7 +249,6 @@ router.post('/test', adminOnly, async (req, res) => {
   }
 
   try {
-    const WhatsappService = require('../services/whatsappService');
     const result = await WhatsappService.sendServiceAlert(phone, message);
     if (result && result.success) {
       return res.json({ success: true, message: 'Test message sent', details: result });
@@ -260,7 +273,6 @@ router.post('/send-join-instructions', adminOnly, async (req, res) => {
   }
 
   try {
-    const WhatsappService = require('../services/whatsappService');
     const whatsappService = new WhatsappService();
     
     // Try WhatsApp first
@@ -310,11 +322,6 @@ router.post('/send-join-instructions', adminOnly, async (req, res) => {
     return res.status(500).json({ success: false, error: err.message || 'Internal error' });
   }
 });
-
-const normalizeWhatsAppPhone = (phone) => {
-  if (!phone) return null;
-  return String(phone).replace('whatsapp:', '').trim();
-};
 
 /**
  * GET /api/whatsapp/chats
@@ -469,7 +476,7 @@ router.delete('/chats/:phone', adminOnly, async (req, res) => {
 
   try {
     const deletedMessages = await MessageModel.deleteWhatsAppChat(storagePhone);
-    console.log(`[WhatsApp] Deleted chat for ${storagePhone}: ${deletedMessages.length} messages removed`);
+    console.log(`[WhatsApp] Deleted chat history for ${storagePhone}`);
     res.json({ success: true, deleted: deletedMessages.length });
   } catch (error) {
     console.error('Delete WhatsApp chat failed:', error.message);

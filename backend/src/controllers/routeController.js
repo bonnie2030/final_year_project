@@ -1,6 +1,7 @@
 const RouteModel = require('../models/routeModel');
 
 class RouteController {
+  // List all active routes for booking, dashboards, and admin views.
   static async getAll(req, res) {
     try {
       const routes = await RouteModel.getAllRoutes();
@@ -24,12 +25,12 @@ class RouteController {
 
   static async create(req, res) {
     try {
+      // Accept both basic route metadata and optional geolocation waypoints.
       const { 
         route_name, 
         start_location, 
         end_location, 
         base_fare, 
-        distance_km,
         start_latitude, 
         start_longitude, 
         end_latitude, 

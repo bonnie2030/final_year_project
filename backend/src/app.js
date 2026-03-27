@@ -22,14 +22,14 @@ const locationRoutes = require('./routes/locationRoutes');
 const customerRoutes = require('./routes/customerRoutes');
 const sessionRoutes = require('./routes/sessionRoutes');
 const errorMiddleware = require('./middlewares/errorMiddleware');
-const { createReportsTable } = require('./migrations/createReportsTable');
 
 const app = express();
 
 // Trust proxy
 app.set('trust proxy', 1);
 
-// Middleware
+// Security and transport middleware.
+// CORS policy is environment-driven so deployments can whitelist specific frontends.
 app.use(helmet());
 
 // CORS Configuration - Smart private network detection for mobile/local network access
@@ -79,6 +79,7 @@ app.use(cors({
 }));
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
+// Expose uploaded assets (driver photos, evidence files) under a stable URL prefix.
 app.use('/uploads', express.static(path.join(__dirname, '..', 'uploads')));
 
 // Health check
@@ -86,7 +87,7 @@ app.get('/health', (req, res) => {
   res.json({ message: 'API is running', timestamp: new Date() });
 });
 
-// API Routes
+// Route mounting by feature area keeps handlers small and domain-focused.
 app.use('/api/auth', authRoutes);
 app.use('/api/users', userRoutes);
 app.use('/api/occupancy', occupancyRoutes);

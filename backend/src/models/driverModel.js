@@ -21,6 +21,13 @@ class DriverModel {
         IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='drivers' AND column_name='driving_license') THEN
           ALTER TABLE drivers ADD COLUMN driving_license VARCHAR(100);
         END IF;
+
+        -- Enforce one vehicle -> one driver assignment while still allowing NULL (unassigned).
+        IF NOT EXISTS (
+          SELECT 1 FROM pg_indexes WHERE schemaname = 'public' AND indexname = 'drivers_assigned_vehicle_unique_idx'
+        ) THEN
+          CREATE UNIQUE INDEX drivers_assigned_vehicle_unique_idx ON drivers (assigned_vehicle_id) WHERE assigned_vehicle_id IS NOT NULL;
+        END IF;
       END
       $$;
     `;

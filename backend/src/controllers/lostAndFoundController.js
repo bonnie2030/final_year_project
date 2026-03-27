@@ -61,14 +61,13 @@ class LostAndFoundController {
         if (whatsappResult?.success) {
           whatsappStatus.sent = true;
           whatsappStatus.messageId = whatsappResult?.messageId || null;
-          console.log('✓ Lost and found confirmation WhatsApp sent to', phoneNumber);
         } else {
           whatsappStatus.sent = false;
           whatsappStatus.needsJoin = Boolean(whatsappResult?.needsJoin);
           whatsappStatus.error = whatsappResult?.error || 'Failed to send WhatsApp confirmation';
           whatsappStatus.errorCode = whatsappResult?.code || null;
           whatsappStatus.joinInstructions = whatsappResult?.joinInstructions || null;
-          console.warn('⚠️ Lost and found WhatsApp confirmation not sent:', {
+          console.warn('Lost and found WhatsApp confirmation not sent:', {
             phoneNumber,
             error: whatsappStatus.error,
             needsJoin: whatsappStatus.needsJoin,
@@ -77,7 +76,7 @@ class LostAndFoundController {
       } catch (whatsappError) {
         whatsappStatus.sent = false;
         whatsappStatus.error = whatsappError.message;
-        console.error('⚠️ Failed to send Lost and Found WhatsApp confirmation:', whatsappError.message);
+        console.error('Failed to send Lost and Found WhatsApp confirmation:', whatsappError.message);
         // Don't fail the API response - report is already created
       }
 

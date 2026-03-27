@@ -2,16 +2,20 @@ import React, { useState, useEffect } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { Helmet } from 'react-helmet-async';
 import Header from '@/components/Header';
-import { Bus, AlertCircle, ShieldCheck, Clock3, KeyRound, Eye, EyeOff } from 'lucide-react';
+import { Bus, AlertCircle, ShieldCheck, Clock3, KeyRound, Eye, EyeOff, Zap } from 'lucide-react';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
 import { Label } from '@/components/ui/label';
 import { useToast } from '@/hooks/use-toast';
 
+const DEMO_USERNAME = 'DRIVE0007';
+const DEMO_PASSWORD = 'Driver@Matatu2024!';
+
 export default function DriverLogin() {
   const [identifier, setIdentifier] = useState('');
   const [password, setPassword] = useState('');
   const [sessionInvalidated, setSessionInvalidated] = useState(false);
+  const [isLoading, setIsLoading] = useState(false);
   const navigate = useNavigate();
   const location = useLocation();
   const { toast } = useToast();
@@ -28,10 +32,19 @@ export default function DriverLogin() {
 
   const handleLogin = async () => {
     if (!identifier || !password) return toast({ title: 'Missing fields', description: 'Enter username/email and password', variant: 'destructive' });
+    setIsLoading(true);
     try {
-      const res = await fetch((import.meta.env.VITE_API_URL || '') + '/api/auth/login', {
+      const normalizedIdentifier = identifier.trim();
+      const normalizedPassword = password.trim();
+      const isDemo = identifier === DEMO_USERNAME;
+      const endpoint = isDemo ? '/api/auth/demo_driver_login' : '/api/auth/login';
+      const res = await fetch((import.meta.env.VITE_API_URL || '') + endpoint, {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email: identifier, password })
+        body: JSON.stringify({
+          identifier: normalizedIdentifier,
+          email: normalizedIdentifier,
+          password: normalizedPassword,
+        })
       });
       const data = await res.json();
       if (res.ok) {
@@ -48,6 +61,34 @@ export default function DriverLogin() {
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : String(err || 'Error');
       toast({ title: 'Login failed', description: message || 'Error', variant: 'destructive' });
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const quickDemoLogin = async () => {
+    setIdentifier(DEMO_USERNAME);
+    setPassword(DEMO_PASSWORD);
+    setIsLoading(true);
+    try {
+      const res = await fetch((import.meta.env.VITE_API_URL || '') + '/api/auth/demo_driver_login', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ identifier: DEMO_USERNAME, password: DEMO_PASSWORD })
+      });
+      const data = await res.json();
+      if (res.ok) {
+        localStorage.setItem('token', data.token);
+        localStorage.setItem('userRole', data.user.role);
+        toast({ title: 'Welcome!', description: 'Demo driver portal access granted.' });
+        navigate('/driver/dashboard');
+      } else {
+        toast({ title: 'Demo Login Failed', description: data.message || 'Invalid credentials', variant: 'destructive' });
+      }
+    } catch (err: any) {
+      toast({ title: 'Demo Login Failed', description: err.message || 'Error', variant: 'destructive' });
+    } finally {
+      setIsLoading(false);
     }
   };
 
@@ -66,7 +107,7 @@ export default function DriverLogin() {
         setHasSaved(true);
       }
     } catch (e) {
-      // ignore
+      console.warn('Unable to parse saved driver credentials', e);
     }
   }, []);
 
@@ -79,7 +120,9 @@ export default function DriverLogin() {
       if (creds.password) setPassword(creds.password);
       setSavedCreds(creds);
       setHasSaved(true);
-    } catch (e) {}
+    } catch (e) {
+      console.warn('Unable to load saved credentials', e);
+    }
   };
 
   const quickLogin = async () => {
@@ -90,9 +133,21 @@ export default function DriverLogin() {
       if (!creds.username || !creds.password) return;
       setIdentifier(creds.username);
       setPassword(creds.password);
-      await handleLogin();
+      const res = await fetch((import.meta.env.VITE_API_URL || '') + '/api/auth/login', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ identifier: creds.username, email: creds.username, password: creds.password })
+      });
+      const data = await res.json();
+      if (res.ok) {
+        localStorage.setItem('token', data.token);
+        localStorage.setItem('userRole', data.user.role);
+        toast({ title: 'Logged in', description: 'Welcome back' });
+        navigate('/driver/dashboard');
+      } else {
+        toast({ title: 'Login failed', description: data.message || 'Invalid credentials', variant: 'destructive' });
+      }
     } catch (e) {
-      // ignore
+      console.warn('Quick login failed', e);
     }
   };
 
@@ -181,24 +236,38 @@ export default function DriverLogin() {
             </div>
 
             {hasSaved && savedCreds && (
-              <div className="p-3 bg-slate-50 border rounded-md text-sm flex items-center justify-between">
+              <div className="p-3 bg-slate-50 border rounded-md text-sm flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
                 <div>
-                  <div className="font-mono">{savedCreds.username}</div>
+                  <div className="font-mono break-all">{savedCreds.username}</div>
                   <div className="text-xs text-muted-foreground">Password: {'••••••••'}</div>
                 </div>
-                <div className="flex items-center gap-2">
-                  <Button size="sm" variant="ghost" onClick={useSaved}>Use</Button>
-                  <Button size="sm" variant="outline" onClick={() => { try { navigator.clipboard.writeText(`Username: ${savedCreds.username}\nPassword: ${savedCreds.password}`); toast({ title: 'Copied credentials to clipboard' }); } catch (e) { toast({ title: 'Copy failed' }); } }}>Copy</Button>
-                  <Button size="sm" variant="secondary" onClick={async () => { await quickLogin(); }}>Quick Login</Button>
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 w-full sm:w-auto">
+                  <Button size="sm" variant="ghost" className="w-full" onClick={useSaved}>Use</Button>
+                  <Button size="sm" variant="outline" className="w-full" onClick={() => { try { navigator.clipboard.writeText(`Username: ${savedCreds.username}\nPassword: ${savedCreds.password}`); toast({ title: 'Copied credentials to clipboard' }); } catch (e) { toast({ title: 'Copy failed' }); } }}>Copy</Button>
+                  <Button size="sm" variant="secondary" className="w-full" onClick={async () => { await quickLogin(); }}>Quick Login</Button>
                 </div>
               </div>
             )}
 
+            <div className="rounded-xl border border-blue-200 bg-blue-50 p-4">
+              <p className="text-sm font-semibold text-blue-900 mb-2">Demo Credentials:</p>
+              <p className="text-sm text-blue-800 break-all">Username: <span className="font-mono">{DEMO_USERNAME}</span></p>
+              <p className="text-sm text-blue-800 break-all">Password: <span className="font-mono">{DEMO_PASSWORD}</span></p>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 mt-3">
+                <Button size="sm" variant="outline" className="flex-1" onClick={() => { setIdentifier(DEMO_USERNAME); setPassword(DEMO_PASSWORD); }}>
+                  Fill Credentials
+                </Button>
+                <Button size="sm" className="flex-1 bg-blue-600 hover:bg-blue-700" onClick={quickDemoLogin} disabled={isLoading}>
+                  <Zap className="h-4 w-4 mr-1" /> Quick Demo Login
+                </Button>
+              </div>
+            </div>
+
             <div className="flex gap-3 items-center">
-              <Button className="flex-1" onClick={handleLogin}>
+              <Button className="flex-1" onClick={handleLogin} disabled={isLoading}>
                 Sign in
               </Button>
-              <Button variant="outline" onClick={() => { navigate('/admin/login'); }}>Admin</Button>
+              <Button variant="outline" className="min-w-[96px]" onClick={() => { navigate('/admin/login'); }}>Admin</Button>
             </div>
 
             <div className="text-sm text-muted-foreground mt-2">Tip: the admin dashboard can create driver accounts and provide credentials.</div>

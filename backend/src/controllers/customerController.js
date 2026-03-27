@@ -1,6 +1,6 @@
 const db = require('../config/database');
 
-// Store customer locations in memory for real-time tracking
+// In-memory cache for ephemeral customer location snapshots used by map previews.
 const customerLocations = new Map();
 
 /**
@@ -35,10 +35,10 @@ exports.saveLocation = async (req, res) => {
         [parseFloat(latitude), parseFloat(longitude), new Date(), clientIp]
       ).catch(err => {
         // Table might not exist, continue anyway
-        console.log('customer_locations table not available:', err.message);
+        console.warn('customer_locations table not available:', err.message);
       });
     } catch (dbError) {
-      console.log('Database save attempt:', dbError.message);
+      console.warn('Customer location DB save skipped:', dbError.message);
     }
 
     res.json({

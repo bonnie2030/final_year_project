@@ -15,6 +15,8 @@ import {
 import api from "@/lib/api";
 import io from 'socket.io-client';
 
+const API_BASE = import.meta.env.VITE_API_URL || '';
+
 interface RouteRecord {
   id: number;
   route_name?: string;
@@ -132,7 +134,7 @@ const OccupancyManager = ({ station = '' }: { station?: string }) => {
 
   // Socket: listen for booking.created events and refresh occupancy if relevant
   useEffect(() => {
-    const socket = io();
+    const socket = API_BASE ? io(API_BASE, { transports: ['websocket', 'polling'] }) : io(undefined, { transports: ['websocket', 'polling'] });
     socket.on('connect', () => {
       socket.emit('join', 'admin');
     });

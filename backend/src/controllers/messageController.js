@@ -3,6 +3,7 @@ const ActivityLogModel = require('../models/activityLogModel');
 const UserModel = require('../models/userModel');
 
 class MessageController {
+  // Persist one chat message and fan it out over socket rooms.
   static async sendMessage(req, res) {
     try {
       const senderId = req.userId;
@@ -11,7 +12,7 @@ class MessageController {
 
       const msg = await MessageModel.createMessage({ senderId, receiverId, tripId: tripId || null, message });
 
-      // log activity
+      // Keep a minimal audit trail for chat events.
       try {
         await ActivityLogModel.logActivity(senderId, 'chat_message_sent', 'message', msg.id, JSON.stringify({ receiverId }), req.ip || null);
       } catch (e) { console.error('Failed to log chat message:', e); }
@@ -31,6 +32,7 @@ class MessageController {
     }
   }
 
+  // Returns direct conversation between the logged-in user and one peer.
   static async getConversation(req, res) {
     try {
       const userId = req.userId;
@@ -44,6 +46,7 @@ class MessageController {
     }
   }
 
+  // Lightweight unread badge endpoint for header notifications.
   static async getUnreadCounts(req, res) {
     try {
       const userId = req.userId;

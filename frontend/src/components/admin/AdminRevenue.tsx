@@ -4,11 +4,24 @@ import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer } from 'recha
 import api from '@/lib/api';
 import { useToast } from '@/hooks/use-toast';
 
+type RevenueByRoute = {
+  id?: number;
+  route_name?: string;
+  revenue?: number | string;
+};
+
+type RevenueResponse = {
+  total_revenue: number;
+  payments_count: number;
+  bookings_count: number;
+  revenue_by_route: RevenueByRoute[];
+};
+
 const AdminRevenue = () => {
   const { toast } = useToast();
   const [period, setPeriod] = useState<'day'|'week'|'month'|'range'>('week');
 
-  const { data, isLoading, isError } = useQuery<{ total_revenue: number; payments_count: number; bookings_count: number; revenue_by_route: any[] }>(
+  const { data, isLoading, isError } = useQuery<RevenueResponse>(
     {
       queryKey: ['admin','revenue', period],
       queryFn: () => api.admin.getRevenue({ period }),
@@ -20,8 +33,13 @@ const AdminRevenue = () => {
     toast({ title: 'Failed to fetch revenue', description: 'Please try again', variant: 'destructive' });
   }
 
-  const revenueData: any = data || {};
-  const chartData = (revenueData.revenue_by_route || []).map((r: any) => ({ name: r.route_name || `Route ${r.id}`, revenue: Number(r.revenue || 0) }));
+  const revenueData: RevenueResponse = data || { total_revenue: 0, payments_count: 0, bookings_count: 0, revenue_by_route: [] };
+  const chartData = (revenueData.revenue_by_route || []).map((r) => ({ name: r.route_name || `Route ${r.id}`, revenue: Number(r.revenue || 0) }));
+
+  const parsePeriod = (value: string): 'day' | 'week' | 'month' | 'range' => {
+    if (value === 'day' || value === 'week' || value === 'month' || value === 'range') return value;
+    return 'week';
+  };
 
   return (
     <div className="space-y-4">
@@ -31,7 +49,7 @@ const AdminRevenue = () => {
           <h4 className="text-lg font-semibold">Total Revenue & Breakdown</h4>
         </div>
         <div className="flex items-center gap-2">
-          <select className="rounded-md border px-3 py-2 bg-background" value={period} onChange={(e) => setPeriod(e.target.value as any)}>
+          <select className="rounded-md border px-3 py-2 bg-background" value={period} onChange={(e) => setPeriod(parsePeriod(e.target.value))}>
             <option value="day">Today</option>
             <option value="week">Last 7 days</option>
             <option value="month">This month</option>
@@ -61,7 +79,7 @@ const AdminRevenue = () => {
             <BarChart data={chartData} margin={{ top: 10, right: 20, bottom: 20, left: 0 }}>
               <XAxis dataKey="name" tick={{ fontSize: 12 }} />
               <YAxis />
-              <Tooltip formatter={(value: any) => `KES ${Number(value).toLocaleString()}`} />
+              <Tooltip formatter={(value: number | string) => `KES ${Number(value).toLocaleString()}`} />
               <Bar dataKey="revenue" fill="#10B981" />
             </BarChart>
           </ResponsiveContainer>

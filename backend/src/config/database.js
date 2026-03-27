@@ -176,6 +176,7 @@ process.on('SIGINT', async () => {
   console.log('✓ Database pool closed');
   process.exit(0);
 });
+// Export a dynamic proxy so consumers always hit the current active pool (cloud or local fallback).
 const pool = new Proxy({}, {
   get(_target, prop, _receiver) {
     if (prop === 'query') {

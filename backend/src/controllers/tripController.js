@@ -2,6 +2,7 @@ const TripModel = require('../models/tripModel');
 const BookingModel = require('../models/bookingModel');
 
 class TripController {
+  // Create a schedulable trip tied to route + vehicle.
   static async createTrip(req, res) {
     try {
       const { vehicleId, routeId, saccoId, capacity, startTime, origin, destination } = req.body;
@@ -59,7 +60,7 @@ class TripController {
       if (!tripId || !passengerName || !phoneNumber) return res.status(400).json({ message: 'Missing required booking fields' });
 
       // Create booking
-      const ticketCode = `TKT-${Date.now()}-${Math.random().toString(36).substr(2,6).toUpperCase()}`;
+      const ticketCode = `TKT-${Date.now()}-${Math.random().toString(36).slice(2, 8).toUpperCase()}`;
       const booking = await BookingModel.createBooking({ tripId, passengerName, phoneNumber, originStop, destinationStop, ticketCode });
 
       // increment occupancy

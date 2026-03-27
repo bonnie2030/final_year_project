@@ -39,25 +39,26 @@ class AuthController {
   // Login
   static async login(req, res) {
     try {
-      const { email, password } = req.body;
+      const { email, identifier, username, password } = req.body;
+      const loginIdentifier = (identifier || email || username || '').trim();
 
-      if (!email || !password) {
-        return res.status(400).json({ message: 'Email and password are required' });
+      if (!loginIdentifier || !password) {
+        return res.status(400).json({ message: 'Username/email and password are required' });
       }
 
       // Get user by email or username
-      const user = await UserModel.getUserByIdentifier(email);
+      const user = await UserModel.getUserByIdentifier(loginIdentifier);
       if (!user) {
-        return res.status(401).json({ message: 'Invalid email or password' });
+        return res.status(401).json({ message: 'Invalid username/email or password' });
       }
 
       // Verify password
       const isPasswordValid = await UserModel.verifyPassword(password, user.password);
       if (!isPasswordValid) {
-        return res.status(401).json({ message: 'Invalid email or password' });
+        return res.status(401).json({ message: 'Invalid username/email or password' });
       }
 
-      // Determine JWT expiration (7 days)
+      // Build JWT expiry metadata once and reuse for both token and persisted session.
       const expiresIn = process.env.JWT_EXPIRE || '7d';
       const expiresInMS = AuthController.parseExpireTime(expiresIn);
       const expiresAt = new Date(Date.now() + expiresInMS);
@@ -73,7 +74,7 @@ class AuthController {
       const deviceInfo = req.headers['user-agent'] || 'Unknown Device';
       const ipAddress = req.ip || req.connection.remoteAddress || req.socket.remoteAddress;
 
-      // Save session (for drivers: invalidates old sessions; for admins: allows multiple sessions)
+      // Save session state in DB so middleware can enforce single-device rules for drivers.
       await SessionModel.saveSession(user.id, token, deviceInfo, ipAddress, expiresAt, user.role);
 
       // Check if was logged in from another device (only relevant for drivers)
@@ -122,7 +123,6 @@ class AuthController {
         try {
           const DriverModel = require('../models/driverModel');
           const driverDetails = await DriverModel.getDriverByUserId(userId);
-          console.log('Driver details for userId', userId, ':', driverDetails);
           if (driverDetails) {
             // Merge driver details with user data
             user.assigned_vehicle_id = driverDetails.assigned_vehicle_id;
@@ -133,9 +133,6 @@ class AuthController {
             user.route_name = driverDetails.route_name;
             user.start_location = driverDetails.start_location;
             user.end_location = driverDetails.end_location;
-            console.log('Assigned vehicle:', user.assigned_vehicle_id, 'Reg:', user.vehicle_reg, 'Route:', user.route_name);
-          } else {
-            console.log('No driver record found for userId', userId);
           }
         } catch (driverError) {
           console.error('Error fetching driver details:', driverError.message);
@@ -220,8 +217,17 @@ class AuthController {
   // Demo admin login: used by the demo admin UI to obtain a JWT
   static async demoLogin(req, res) {
     try {
-      const DEMO_EMAIL = process.env.DEMO_ADMIN_EMAIL || 'admin@matatuconnect.test';
-      const DEMO_PASSWORD = process.env.DEMO_ADMIN_PASSWORD || 'password123';
+      const demoEnabled = String(process.env.ENABLE_DEMO_LOGIN || 'false').toLowerCase() === 'true';
+      if (!demoEnabled) {
+        return res.status(403).json({ message: 'Demo login is disabled' });
+      }
+
+      const DEMO_EMAIL = process.env.DEMO_ADMIN_EMAIL;
+      const DEMO_PASSWORD = process.env.DEMO_ADMIN_PASSWORD;
+      if (!DEMO_EMAIL || !DEMO_PASSWORD) {
+        return res.status(500).json({ message: 'Demo login is misconfigured' });
+      }
+
       const { email, password } = req.body;
 
       if (email !== DEMO_EMAIL || password !== DEMO_PASSWORD) {
@@ -247,13 +253,71 @@ class AuthController {
         }
       }
 
-      const jwt = require('jsonwebtoken');
       const token = jwt.sign({ id: adminUser.id, email: adminUser.email, role: 'admin' }, process.env.JWT_SECRET, { expiresIn: process.env.JWT_EXPIRE || '7d' });
 
       res.json({ message: 'Demo login successful', token, user: { id: adminUser.id, email: adminUser.email, role: 'admin' } });
     } catch (error) {
       console.error('Demo login error:', error);
       res.status(500).json({ message: 'Demo login failed', error: error.message });
+    }
+  }
+
+  // Demo driver login: used by the demo driver UI to obtain a JWT
+  static async demoDriverLogin(req, res) {
+    try {
+      const demoEnabled = String(process.env.ENABLE_DEMO_DRIVER_LOGIN || 'false').toLowerCase() === 'true';
+      if (!demoEnabled) {
+        return res.status(403).json({ message: 'Demo driver login is disabled' });
+      }
+
+      const DEMO_USERNAME = process.env.DEMO_DRIVER_USERNAME;
+      const DEMO_PASSWORD = process.env.DEMO_DRIVER_PASSWORD;
+      if (!DEMO_USERNAME || !DEMO_PASSWORD) {
+        return res.status(500).json({ message: 'Demo driver login is misconfigured' });
+      }
+
+      const { identifier, password } = req.body;
+
+      if (identifier !== DEMO_USERNAME || password !== DEMO_PASSWORD) {
+        return res.status(401).json({ message: 'Invalid demo credentials' });
+      }
+
+      // Ensure demo driver user exists; if not create one
+      const bcrypt = require('bcryptjs');
+      const pool = require('../config/database');
+      const DriverModel = require('../models/driverModel');
+      
+      let driverUser = await UserModel.getUserByIdentifier(DEMO_USERNAME);
+      if (!driverUser) {
+        // Create demo driver user
+        const hashed = await bcrypt.hash(DEMO_PASSWORD, 10);
+        const insert = `INSERT INTO users (name, email, username, password, role) VALUES ($1, $2, $3, $4, 'driver') RETURNING *;`;
+        const r = await pool.query(insert, ['Demo Driver', 'demo-driver@matatuconnect.test', DEMO_USERNAME, hashed]);
+        driverUser = r.rows[0];
+        
+        // Create driver profile if not exists
+        const existingDriver = await DriverModel.getDriverByUserId(driverUser.id);
+        if (!existingDriver) {
+          await pool.query(
+            `INSERT INTO drivers (user_id, driving_license, status) VALUES ($1, $2, $3)`,
+            [driverUser.id, 'DEMO-LICENSE-0007', 'active']
+          );
+        }
+      } else {
+        // Sync role and password with env vars
+        const passwordMatches = await bcrypt.compare(DEMO_PASSWORD, driverUser.password);
+        if (driverUser.role !== 'driver' || !passwordMatches) {
+          const hashed = await bcrypt.hash(DEMO_PASSWORD, 10);
+          await pool.query('UPDATE users SET role = $1, password = $2 WHERE id = $3', ['driver', hashed, driverUser.id]);
+        }
+      }
+
+      const token = jwt.sign({ id: driverUser.id, email: driverUser.email, role: 'driver' }, process.env.JWT_SECRET, { expiresIn: process.env.JWT_EXPIRE || '7d' });
+
+      res.json({ message: 'Demo driver login successful', token, user: { id: driverUser.id, email: driverUser.email, role: 'driver' } });
+    } catch (error) {
+      console.error('Demo driver login error:', error);
+      res.status(500).json({ message: 'Demo driver login failed', error: error.message });
     }
   }
 }

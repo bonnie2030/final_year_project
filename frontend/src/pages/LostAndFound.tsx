@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import Header from '@/components/Header';
 import { Button } from '@/components/ui/button';
@@ -10,6 +10,9 @@ import { PackageSearch, Phone, Car, Loader2, CheckCircle2, ArrowLeft } from 'luc
 import { toast } from 'sonner';
 import api from '@/lib/api';
 
+const UNSURE_ROUTE_VALUE = '__UNSURE_ROUTE__';
+const UNSURE_VEHICLE_VALUE = '__UNSURE_VEHICLE__';
+
 export default function LostAndFound() {
   const navigate = useNavigate();
   const [formData, setFormData] = useState({
@@ -17,17 +20,150 @@ export default function LostAndFound() {
     phoneNumber: '',
     vehiclePlate: '',
   });
+  const [routes, setRoutes] = useState<Array<{ id: string; name: string; from: string; to: string }>>([]);
+  const [selectedRouteId, setSelectedRouteId] = useState('');
+  const [routeVehicles, setRouteVehicles] = useState<Array<{ id: number; registration: string; isFull: boolean }>>([]);
+  const [routesLoading, setRoutesLoading] = useState(false);
+  const [vehiclesLoading, setVehiclesLoading] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isSuccess, setIsSuccess] = useState(false);
   const [successData, setSuccessData] = useState<any>(null);
   const [whatsAppStatus, setWhatsAppStatus] = useState<any>(null);
 
-  const handleChange = (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => {
+  const handleChange = (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>) => {
     setFormData({
       ...formData,
       [e.target.name]: e.target.value,
     });
   };
+
+  useEffect(() => {
+    let active = true;
+
+    const loadRoutes = async () => {
+      setRoutesLoading(true);
+      try {
+        const routesRes = await api.routes.getAll();
+        const routeList = Array.isArray(routesRes)
+          ? routesRes
+          : Array.isArray((routesRes as any)?.routes)
+            ? (routesRes as any).routes
+            : [];
+
+        const mapped = routeList.map((route: any) => ({
+          id: String(route.id),
+          name: route.route_name || route.routeName || `Route ${route.id}`,
+          from: route.start_location || route.startLocation || '',
+          to: route.end_location || route.endLocation || '',
+        }));
+
+        if (active) {
+          setRoutes(mapped);
+        }
+      } catch (error) {
+        if (active) {
+          setRoutes([]);
+        }
+      } finally {
+        if (active) {
+          setRoutesLoading(false);
+        }
+      }
+    };
+
+    loadRoutes();
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  useEffect(() => {
+    let active = true;
+
+    const loadVehiclesForRoute = async () => {
+      if (!selectedRouteId || selectedRouteId === UNSURE_ROUTE_VALUE) {
+        setRouteVehicles([]);
+        return;
+      }
+
+      setVehiclesLoading(true);
+      try {
+        const [vehiclesRes, occupancyRes] = await Promise.all([
+          api.vehicles.getByRoute(Number(selectedRouteId)),
+          api.occupancy.getAll(),
+        ]);
+
+        const vehicleList = Array.isArray(vehiclesRes)
+          ? vehiclesRes
+          : Array.isArray((vehiclesRes as any)?.vehicles)
+            ? (vehiclesRes as any).vehicles
+            : [];
+
+        const occupancyList = Array.isArray(occupancyRes)
+          ? occupancyRes
+          : Array.isArray((occupancyRes as any)?.occupancies)
+            ? (occupancyRes as any).occupancies
+            : [];
+
+        const occupancyByVehicle = new Map<number, { current: number; capacity: number; status: string }>();
+        occupancyList.forEach((entry: any) => {
+          const id = Number(entry.vehicle_id ?? entry.vehicleId ?? 0);
+          if (!id) return;
+          occupancyByVehicle.set(id, {
+            current: Number(entry.current_occupancy ?? 0),
+            capacity: Number(entry.capacity ?? 14),
+            status: String(entry.occupancy_status || '').toLowerCase(),
+          });
+        });
+
+        const mappedVehicles = vehicleList
+          .map((vehicle: any) => {
+            const id = Number(vehicle.id || 0);
+            const registration = (vehicle.registration_number || vehicle.registration || vehicle.number || '').toString().trim();
+            if (!id || !registration) return null;
+
+            const occupancy = occupancyByVehicle.get(id);
+            const isFull = Boolean(occupancy) && (occupancy.current >= occupancy.capacity || occupancy.status === 'full');
+            return {
+              id,
+              registration,
+              isFull,
+            };
+          })
+          .filter((value: { id: number; registration: string; isFull: boolean } | null): value is { id: number; registration: string; isFull: boolean } => Boolean(value));
+
+        if (active) {
+          setRouteVehicles(mappedVehicles);
+
+          if (formData.vehiclePlate) {
+            const stillExists = mappedVehicles.some((vehicle) => vehicle.registration === formData.vehiclePlate);
+            if (!stillExists) {
+              setFormData((prev) => ({ ...prev, vehiclePlate: '' }));
+            }
+          }
+        }
+      } catch (error) {
+        if (active) {
+          setRouteVehicles([]);
+        }
+      } finally {
+        if (active) {
+          setVehiclesLoading(false);
+        }
+      }
+    };
+
+    loadVehiclesForRoute();
+    return () => {
+      active = false;
+    };
+  }, [selectedRouteId, formData.vehiclePlate]);
+
+  const groupedVehicles = useMemo(() => {
+    const available = routeVehicles.filter((vehicle) => !vehicle.isFull);
+    const full = routeVehicles.filter((vehicle) => vehicle.isFull);
+    return { available, full };
+  }, [routeVehicles]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -46,7 +182,12 @@ export default function LostAndFound() {
     setIsSubmitting(true);
 
     try {
-      const response = await api.lostAndFound.createReport(formData);
+      const payload = {
+        ...formData,
+        vehiclePlate: formData.vehiclePlate === UNSURE_VEHICLE_VALUE ? '' : formData.vehiclePlate,
+      };
+
+      const response = await api.lostAndFound.createReport(payload);
 
       if (response.success) {
         setSuccessData(response.data);
@@ -267,21 +408,79 @@ export default function LostAndFound() {
                     </div>
 
                     <div className="space-y-2">
+                      <Label htmlFor="routeSelect" className="text-base font-medium">
+                        Route (The route you were traveling on when you lost the item)
+                      </Label>
+                      <select
+                        id="routeSelect"
+                        value={selectedRouteId}
+                        onChange={(e) => {
+                          const nextRoute = e.target.value;
+                          setSelectedRouteId(nextRoute);
+                          if (nextRoute === UNSURE_ROUTE_VALUE) {
+                            setFormData((prev) => ({ ...prev, vehiclePlate: UNSURE_VEHICLE_VALUE }));
+                          }
+                        }}
+                        className="w-full rounded-md border px-3 py-2 bg-background text-base"
+                      >
+                        <option value="">Select route</option>
+                        <option value={UNSURE_ROUTE_VALUE}>I am not sure of the route</option>
+                        {routesLoading && <option value="">Loading routes...</option>}
+                        {!routesLoading && routes.length === 0 && <option value="">No routes available</option>}
+                        {routes.map((route) => (
+                          <option key={route.id} value={route.id}>
+                            {route.name}{route.from || route.to ? ` - ${route.from} to ${route.to}` : ''}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+
+                    <div className="space-y-2">
                       <Label htmlFor="vehiclePlate" className="text-base font-medium flex items-center gap-2">
                         <Car className="h-4 w-4" />
-                        Vehicle Plate Number (Optional)
+                        Vehicle Plate Number 
                       </Label>
-                      <Input
+                      <select
                         id="vehiclePlate"
                         name="vehiclePlate"
-                        type="text"
-                        placeholder="KAA 123B"
                         value={formData.vehiclePlate}
                         onChange={handleChange}
-                        className="text-base uppercase"
-                      />
+                        className="w-full rounded-md border px-3 py-2 bg-background text-base"
+                        disabled={vehiclesLoading}
+                      >
+                        <option value={UNSURE_VEHICLE_VALUE}>I am not sure of the vehicle</option>
+                        <option value="">
+                          {!selectedRouteId
+                            ? 'Select route (optional)'
+                            : selectedRouteId === UNSURE_ROUTE_VALUE
+                              ? 'Route unknown - vehicle selection optional'
+                            : vehiclesLoading
+                              ? 'Loading vehicles...'
+                              : 'Skip vehicle'}
+                        </option>
+
+                        {groupedVehicles.available.length > 0 && (
+                          <optgroup label="Available vehicles">
+                            {groupedVehicles.available.map((vehicle) => (
+                              <option key={vehicle.id} value={vehicle.registration}>
+                                {vehicle.registration} (Available)
+                              </option>
+                            ))}
+                          </optgroup>
+                        )}
+
+                        {groupedVehicles.full.length > 0 && (
+                          <optgroup label="Full vehicles">
+                            {groupedVehicles.full.map((vehicle) => (
+                              <option key={vehicle.id} value={vehicle.registration}>
+                                {vehicle.registration} (Full)
+                              </option>
+                            ))}
+                          </optgroup>
+                        )}
+                      </select>
                       <p className="text-sm text-gray-500">
-                        If you remember the matatu's plate number, it helps us locate your item faster
+                        If unsure, choose the "I am not sure" option and continue. If you know route/plate, selecting them helps faster matching.
                       </p>
                     </div>
                   </div>
@@ -309,13 +508,14 @@ export default function LostAndFound() {
                     <Button
                       type="button"
                       variant="outline"
-                      onClick={() =>
+                      onClick={() => {
                         setFormData({
                           itemDescription: '',
                           phoneNumber: '',
                           vehiclePlate: '',
-                        })
-                      }
+                        });
+                        setSelectedRouteId('');
+                      }}
                       className="px-8 py-6 text-base"
                       size="lg"
                     >

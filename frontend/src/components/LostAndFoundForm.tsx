@@ -128,7 +128,7 @@ export default function LostAndFoundForm() {
                 <div className="space-y-2">
                   <Label htmlFor="vehiclePlate" className="text-base font-medium flex items-center gap-2">
                     <Car className="h-4 w-4" />
-                    Vehicle Plate Number (Optional)
+                    Vehicle Plate Number 
                   </Label>
                   <Input
                     id="vehiclePlate"

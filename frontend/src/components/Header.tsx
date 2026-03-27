@@ -7,8 +7,8 @@ import { useSaccoName } from '@/hooks/useSaccoName';
 const navLinks = [
   { to: '/', label: 'Home', icon: HomeIcon },
   { to: '/feedback', label: 'Complaint/Feedback', icon: MessageSquare },
-  { to: '/payment', label: 'Payments', icon: CreditCard },
-  { to: '/occupancy', label: 'Occupancy', icon: MapPin },
+   { to: '/occupancy', label: 'Occupancy', icon: MapPin }
+    ,{ to: '/payment', label: 'Payments', icon: CreditCard },
   { to: '/drivers', label: 'Drivers', icon: Users },
   { to: '/lost-and-found', label: 'Lost and Found', icon: Package },
 ];
