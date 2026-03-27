@@ -39,22 +39,23 @@ class AuthController {
   // Login
   static async login(req, res) {
     try {
-      const { email, password } = req.body;
+      const { email, identifier, username, password } = req.body;
+      const loginIdentifier = (identifier || email || username || '').trim();
 
-      if (!email || !password) {
-        return res.status(400).json({ message: 'Email and password are required' });
+      if (!loginIdentifier || !password) {
+        return res.status(400).json({ message: 'Username/email and password are required' });
       }
 
       // Get user by email or username
-      const user = await UserModel.getUserByIdentifier(email);
+      const user = await UserModel.getUserByIdentifier(loginIdentifier);
       if (!user) {
-        return res.status(401).json({ message: 'Invalid email or password' });
+        return res.status(401).json({ message: 'Invalid username/email or password' });
       }
 
       // Verify password
       const isPasswordValid = await UserModel.verifyPassword(password, user.password);
       if (!isPasswordValid) {
-        return res.status(401).json({ message: 'Invalid email or password' });
+        return res.status(401).json({ message: 'Invalid username/email or password' });
       }
 
       // Build JWT expiry metadata once and reuse for both token and persisted session.

@@ -1,31 +1,34 @@
-import { defineConfig } from "vite";
+import { defineConfig, loadEnv } from "vite";
 import fs from "fs";
 import react from "@vitejs/plugin-react-swc";
 import path from "path";
 import { componentTagger } from "lovable-tagger";
 
-// Auto-detect HTTPS: use certs if they exist, enable HTTPS automatically
+// HTTPS is opt-in for local development.
+// Set VITE_DEV_HTTPS=true to use certificates in .cert/.
 const certPath = path.resolve(__dirname, '.cert/cert.pem');
 const keyPath = path.resolve(__dirname, '.cert/key.pem');
 const hasCerts = fs.existsSync(certPath) && fs.existsSync(keyPath);
 
-const httpsConfig = hasCerts
-  ? {
-      key: fs.readFileSync(keyPath),
-      cert: fs.readFileSync(certPath),
-    }
-  : false;
-
 // https://vitejs.dev/config/
 export default defineConfig(({ mode }) => {
+  const env = loadEnv(mode, __dirname, '');
+  const useHttps = env.VITE_DEV_HTTPS === 'true';
+  const httpsConfig = useHttps && hasCerts
+    ? {
+        key: fs.readFileSync(keyPath),
+        cert: fs.readFileSync(certPath),
+      }
+    : false;
+
   // Get API URL from env, default to localhost
-  const apiUrl = process.env.VITE_API_URL || 'http://localhost:5000';
+  const apiUrl = env.VITE_API_URL || 'http://localhost:5000';
   
   return {
     server: {
       host: "::",
       port: 8080,
-      https: httpsConfig, // Automatically enabled if certs exist
+      https: httpsConfig,
       proxy: {
         '/api': {
           target: apiUrl,

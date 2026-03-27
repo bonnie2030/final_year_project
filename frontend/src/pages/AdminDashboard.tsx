@@ -392,7 +392,7 @@ const AdminDashboard = () => {
   useEffect(() => {
     const socket = API_BASE
       ? io(API_BASE, { transports: ['websocket', 'polling'] })
-      : io();
+      : io(undefined, { transports: ['websocket', 'polling'] });
 
     socket.on('connect', () => {
       socket.emit('join', 'admin');

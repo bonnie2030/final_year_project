@@ -34,11 +34,17 @@ export default function DriverLogin() {
     if (!identifier || !password) return toast({ title: 'Missing fields', description: 'Enter username/email and password', variant: 'destructive' });
     setIsLoading(true);
     try {
+      const normalizedIdentifier = identifier.trim();
+      const normalizedPassword = password.trim();
       const isDemo = identifier === DEMO_USERNAME;
       const endpoint = isDemo ? '/api/auth/demo_driver_login' : '/api/auth/login';
       const res = await fetch((import.meta.env.VITE_API_URL || '') + endpoint, {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ identifier: identifier.trim(), password: password.trim() })
+        body: JSON.stringify({
+          identifier: normalizedIdentifier,
+          email: normalizedIdentifier,
+          password: normalizedPassword,
+        })
       });
       const data = await res.json();
       if (res.ok) {
@@ -129,7 +135,7 @@ export default function DriverLogin() {
       setPassword(creds.password);
       const res = await fetch((import.meta.env.VITE_API_URL || '') + '/api/auth/login', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ identifier: creds.username, password: creds.password })
+        body: JSON.stringify({ identifier: creds.username, email: creds.username, password: creds.password })
       });
       const data = await res.json();
       if (res.ok) {

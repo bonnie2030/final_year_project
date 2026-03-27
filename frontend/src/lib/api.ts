@@ -5,14 +5,17 @@ console.log('[API Config] Base URL:', API_BASE_URL);
 // Helper function to handle API responses
 async function handleResponse<T>(response: Response): Promise<T> {
   if (!response.ok) {
+    const fallbackMessage = `HTTP error! status: ${response.status}`;
+    let parsedError: any = null;
+
     try {
-      const error = await response.json();
-      console.error('[API] Error response:', error);
-      throw new Error(error.message || `HTTP error! status: ${response.status}`);
+      parsedError = await response.json();
+      console.error('[API] Error response:', parsedError);
     } catch (e) {
       console.error('[API] Failed to parse error response:', e);
-      throw new Error(`HTTP error! status: ${response.status}`);
     }
+
+    throw new Error(parsedError?.message || parsedError?.error || fallbackMessage);
   }
   
   const contentType = response.headers.get('content-type');

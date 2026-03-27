@@ -84,7 +84,7 @@ export default function AdminMessages() {
 
   useEffect(() => {
     // Socket keeps conversation and typing state fresh without polling.
-    const socket = io();
+    const socket = io(API_BASE, { transports: ['websocket', 'polling'] });
     socketRef.current = socket;
 
     socket.on('connect', () => {

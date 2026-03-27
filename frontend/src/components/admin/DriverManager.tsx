@@ -1,9 +1,15 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription, DialogClose } from '@/components/ui/dialog';
 import { useToast } from '@/hooks/use-toast';
 import AdminResetLogs from '@/components/admin/AdminResetLogs';
+import EditDriverModal from '@/components/admin/modals/EditDriverModal';
+import PasswordResetModal from '@/components/admin/modals/PasswordResetModal';
+import FormSection from '@/components/admin/FormSection';
+import DriverCard from '@/components/admin/cards/DriverCard';
+import { Loader2 } from 'lucide-react';
 
 const API_BASE = import.meta.env.VITE_API_URL || '';
 
@@ -25,16 +31,24 @@ type Driver = {
 type Vehicle = {
   id: number;
   registration_number?: string;
+  route_id?: number | null;
   route_name?: string | null;
+};
+
+type Route = {
+  id: number;
+  status?: string;
 };
 
 export default function DriverManager() {
   const { toast } = useToast();
   const [drivers, setDrivers] = useState<Driver[]>([]);
   const [vehicles, setVehicles] = useState<Vehicle[]>([]);
+  const [routes, setRoutes] = useState<Route[]>([]);
   const [assignmentDrafts, setAssignmentDrafts] = useState<Record<number, string>>({});
+  const [assignmentRoutes, setAssignmentRoutes] = useState<Record<number, string>>({});
   const [loading, setLoading] = useState(false);
-  const [form, setForm] = useState({ name: '', email: '', phone: '', password: '', driving_license: '', assigned_vehicle_id: '' });
+  const [form, setForm] = useState({ name: '', email: '', phone: '', password: '', driving_license: '', assigned_vehicle_id: '', assigned_route_id: '' });
   const [showAllDrivers, setShowAllDrivers] = useState(false);
   const [selectedDriverId, setSelectedDriverId] = useState<string>('');
   const [uploadingPhotoUserId, setUploadingPhotoUserId] = useState<number | null>(null);
@@ -43,6 +57,10 @@ export default function DriverManager() {
   const [showTempPasswordModal, setShowTempPasswordModal] = useState(false);
   const [tempPassword, setTempPassword] = useState<{ username?: string; password?: string } | null>(null);
   const [showResetLogs, setShowResetLogs] = useState(false);
+  const [editingDriver, setEditingDriver] = useState<Driver | null>(null);
+  const [showEditModal, setShowEditModal] = useState(false);
+  const [editModalLoading, setEditModalLoading] = useState(false);
+  const [expandedAssignmentDriver, setExpandedAssignmentDriver] = useState<number | null>(null);
 
   const getAuthHeaders = useCallback(() => {
     const token = localStorage.getItem('token');
@@ -90,6 +108,18 @@ export default function DriverManager() {
     }
   }, []);
 
+  const fetchRoutes = useCallback(async () => {
+    try {
+      const res = await fetch(API_BASE + '/api/routes', { headers: { ...getAuthHeaders() } });
+      const data = await res.json();
+      if (!res.ok) return;
+      const routesList = Array.isArray(data.routes) ? data.routes : Array.isArray(data) ? data : [];
+      setRoutes(routesList);
+    } catch (err: unknown) {
+      console.error('Failed to load routes:', err);
+    }
+  }, [getAuthHeaders]);
+
   const uploadDriverPhoto = async (userId: number, file: File | null) => {
     if (!file) return;
     try {
@@ -126,8 +156,36 @@ export default function DriverManager() {
       : { assigned: false };
   };
 
-  const getAssignableVehicles = (currentDriverUserId?: number) => {
+  const getActiveRoutes = () => {
+    return routes.filter((r) => String(r.status || 'active').toLowerCase() !== 'inactive');
+  };
+
+  const getVehiclesForRoute = (routeId: string | number, currentDriverUserId?: number) => {
+    if (!routeId) return [];
+    const routeIdNum = Number(routeId);
     return vehicles.filter((v) => {
+      // Only show vehicles from the selected route
+      if (!v.route_id || Number(v.route_id) !== routeIdNum) return false;
+
+      // Exclude vehicles assigned to other drivers
+      const assignedDriver = drivers.find((d) => Number(d.assigned_vehicle_id) === Number(v.id));
+      if (!assignedDriver) return true;
+      if (!currentDriverUserId) return false;
+      return Number(assignedDriver.user_id || assignedDriver.userId) === Number(currentDriverUserId);
+    });
+  };
+
+  const getAssignableVehicles = (currentDriverUserId?: number) => {
+    const activeRouteIds = new Set(
+      routes
+        .filter((r) => String(r.status || 'active').toLowerCase() !== 'inactive')
+        .map((r) => Number(r.id))
+    );
+
+    return vehicles.filter((v) => {
+      // Only list vehicles attached to currently available (active) routes.
+      if (!v.route_id || !activeRouteIds.has(Number(v.route_id))) return false;
+
       const assignedDriver = drivers.find((d) => Number(d.assigned_vehicle_id) === Number(v.id));
       if (!assignedDriver) return true;
       if (!currentDriverUserId) return false;
@@ -165,9 +223,38 @@ export default function DriverManager() {
     }
   };
 
+  const handleEditDriver = async (updates: { name?: string; phone?: string; driving_license?: string }) => {
+    if (!editingDriver) return;
+    try {
+      setEditModalLoading(true);
+      const payload: any = { ...updates };
+
+      const res = await fetch(API_BASE + '/api/drivers/' + (editingDriver.user_id || editingDriver.userId), {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
+        body: JSON.stringify(payload),
+      });
+      const data = await res.json();
+
+      if (res.ok) {
+        toast({ title: 'Driver updated successfully' });
+        fetchDrivers();
+        setShowEditModal(false);
+      } else {
+        toast({ title: 'Update failed', description: data.message || data.error || 'Error', variant: 'destructive' });
+      }
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : 'Error';
+      toast({ title: 'Update failed', description: message, variant: 'destructive' });
+    } finally {
+      setEditModalLoading(false);
+    }
+  };
+
   useEffect(() => { 
     fetchDrivers();
     fetchVehicles();
+    fetchRoutes();
     try {
       const raw = localStorage.getItem('lastCreatedDriver');
       if (raw) setLastCreated(JSON.parse(raw));
@@ -178,10 +265,11 @@ export default function DriverManager() {
     // Auto-refresh vehicles and occupancy every 30 seconds
     const intervalId = setInterval(() => {
       fetchVehicles();
+      fetchRoutes();
     }, 30000);
     
     return () => clearInterval(intervalId);
-  }, [fetchDrivers, fetchVehicles]);
+  }, [fetchDrivers, fetchVehicles, fetchRoutes]);
 
   useEffect(() => {
     if (drivers.length === 0) {
@@ -233,7 +321,7 @@ export default function DriverManager() {
           localStorage.setItem('lastCreatedDriver', JSON.stringify(creds));
           setLastCreated(creds);
         } catch (e) { /* ignore storage errors */ }
-        setForm({ name: '', email: '', phone: '', password: '', driving_license: '', assigned_vehicle_id: '' });
+        setForm({ name: '', email: '', phone: '', password: '', driving_license: '', assigned_vehicle_id: '', assigned_route_id: '' });
         fetchDrivers();
         fetchVehicles(); // Refresh to update assignment status
       } else {
@@ -259,48 +347,140 @@ export default function DriverManager() {
   };
 
   return (
-    <div className="space-y-4">
-      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-        <Input placeholder="Name" value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} />
-        <Input placeholder="Email" value={form.email} onChange={(e) => setForm({ ...form, email: e.target.value })} />
-        <Input placeholder="Phone" value={form.phone} onChange={(e) => setForm({ ...form, phone: e.target.value })} />
-        <Input placeholder="Password" value={form.password} onChange={(e) => setForm({ ...form, password: e.target.value })} />
-        <Input placeholder="Driving License" value={form.driving_license} onChange={(e) => setForm({ ...form, driving_license: e.target.value })} />
-        <select 
-          className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
-          value={form.assigned_vehicle_id} 
-          onChange={(e) => setForm({ ...form, assigned_vehicle_id: e.target.value })}
-        >
-          <option value="">No vehicle (optional)</option>
-          {getAssignableVehicles().map((v) => {
-            const assignmentStatus = isVehicleAssigned(v.id);
-            return (
-              <option key={v.id} value={v.id}>
-                {v.registration_number} - {v.route_name || 'No route'} 
-                {assignmentStatus.assigned ? ` [Assigned to ${assignmentStatus.driverName}]` : ' [Available]'}
-              </option>
-            );
-          })}
-        </select>
-      </div>
-      <p className="text-xs text-muted-foreground">
-        Only available vehicles are selectable for new assignment.
-      </p>
-      <div className="flex gap-2">
-        <Button onClick={handleCreate} disabled={loading} className="bg-green-600">Create Driver</Button>
-        <Button
-          variant="outline"
-          onClick={() => {
-            fetchDrivers();
-            fetchVehicles();
-          }}
-          disabled={loading}
-        >
-          Refresh
-        </Button>
-      </div>
+    <div className="space-y-8">
+      {/* Create Driver Section */}
+      <div className="rounded-lg border border-slate-200 bg-white p-6">
+        <div className="mb-6">
+          <h2 className="text-lg font-bold text-slate-900">Create New Driver</h2>
+          <p className="text-sm text-slate-600 mt-1">Add a new driver to the system with basic information and vehicle assignment.</p>
+        </div>
 
-      <div className="mt-4">
+        <FormSection title="Basic Information" description="Enter driver's personal details">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            <div className="space-y-2">
+              <Label htmlFor="create-name">Name *</Label>
+              <Input
+                id="create-name"
+                placeholder="Full name"
+                value={form.name}
+                onChange={(e) => setForm({ ...form, name: e.target.value })}
+                disabled={loading}
+              />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="create-email">Email *</Label>
+              <Input
+                id="create-email"
+                type="email"
+                placeholder="email@example.com"
+                value={form.email}
+                onChange={(e) => setForm({ ...form, email: e.target.value })}
+                disabled={loading}
+              />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="create-phone">Phone</Label>
+              <Input
+                id="create-phone"
+                placeholder="Phone number"
+                value={form.phone}
+                onChange={(e) => setForm({ ...form, phone: e.target.value })}
+                disabled={loading}
+              />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="create-license">Driving License</Label>
+              <Input
+                id="create-license"
+                placeholder="License number"
+                value={form.driving_license}
+                onChange={(e) => setForm({ ...form, driving_license: e.target.value })}
+                disabled={loading}
+              />
+            </div>
+          </div>
+        </FormSection>
+
+        <FormSection title="Login Credentials" description="Password for driver account login">
+          <div className="space-y-2">
+            <Label htmlFor="create-password">Password *</Label>
+            <Input
+              id="create-password"
+              type="password"
+              placeholder="Secure password"
+              value={form.password}
+              onChange={(e) => setForm({ ...form, password: e.target.value })}
+              disabled={loading}
+            />
+            <p className="text-xs text-slate-600">Driver can change this after their first login.</p>
+          </div>
+        </FormSection>
+
+        <FormSection title="Route & Vehicle Assignment (Optional)" description="Select a route and vehicle for the new driver">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            <div className="space-y-2">
+              <Label htmlFor="create-route">Route</Label>
+              <select
+                id="create-route"
+                className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+                value={form.assigned_route_id}
+                onChange={(e) => {
+                  setForm({ ...form, assigned_route_id: e.target.value, assigned_vehicle_id: '' });
+                }}
+                disabled={loading}
+              >
+                <option value="">Select a route...</option>
+                {getActiveRoutes().map((r) => (
+                  <option key={r.id} value={String(r.id)}>
+                    Route {r.id}
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            <div className="space-y-2">
+              <Label htmlFor="create-vehicle">Vehicle</Label>
+              <select
+                id="create-vehicle"
+                className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+                value={form.assigned_vehicle_id}
+                onChange={(e) => setForm({ ...form, assigned_vehicle_id: e.target.value })}
+                disabled={!form.assigned_route_id || loading}
+              >
+                <option value="">Select a vehicle...</option>
+                {form.assigned_route_id && getVehiclesForRoute(form.assigned_route_id).map((v) => (
+                  <option key={v.id} value={v.id}>
+                    {v.registration_number} - {v.route_name || 'No route'}
+                  </option>
+                ))}
+              </select>
+            </div>
+          </div>
+        </FormSection>
+
+        <div className="flex gap-2 mt-6 pt-6 border-t">
+          <Button onClick={handleCreate} disabled={loading} className="bg-green-600 hover:bg-green-700">
+            {loading ? (
+              <>
+                <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                Creating...
+              </>
+            ) : (
+              '➕ Create Driver'
+            )}
+          </Button>
+          <Button
+            variant="outline"
+            onClick={() => {
+              fetchDrivers();
+              fetchVehicles();
+            }}
+            disabled={loading}
+          >
+            🔄 Refresh
+          </Button>
+        </div>
+      </div>
         <div className="flex items-center justify-between">
           <h3 className="font-semibold">Drivers ({drivers.length})</h3>
           <div className="flex items-center gap-2">
@@ -504,42 +684,61 @@ export default function DriverManager() {
               </div>
 
               <div className="mt-4 border-t pt-3">
-                <p className="text-sm font-medium mb-2">Assign vehicle from available fleet</p>
-                <div className="flex flex-col sm:flex-row gap-2 sm:items-center">
-                  <select
-                    className="w-full sm:max-w-md rounded-md border border-input bg-background px-3 py-2 text-sm"
-                    value={assignmentDrafts[getDriverUserId(d)] ?? (d.assigned_vehicle_id ? String(d.assigned_vehicle_id) : '')}
-                    onChange={(e) => setAssignmentDrafts((prev) => ({ ...prev, [getDriverUserId(d)]: e.target.value }))}
-                  >
-                    <option value="">Unassign vehicle</option>
-                    {getAssignableVehicles(Number(d.user_id || d.userId)).map((v) => {
-                      const assignmentStatus = isVehicleAssigned(v.id);
-                      return (
-                        <option key={v.id} value={String(v.id)}>
-                          {v.registration_number} — {v.route_name || 'No route'}
-                          {assignmentStatus.assigned ? ` [Assigned to ${assignmentStatus.driverName}]` : ' [Available]'}
+                <p className="text-sm font-medium mb-3">Assign Route & Vehicle</p>
+                <div className="flex flex-col gap-3">
+                  <div className="flex flex-col sm:flex-row gap-2">
+                    <select
+                      className="w-full sm:max-w-sm rounded-md border border-input bg-background px-3 py-2 text-sm"
+                      value={assignmentRoutes[getDriverUserId(d)] ?? ''}
+                      onChange={(e) => {
+                        setAssignmentRoutes((prev) => ({ ...prev, [getDriverUserId(d)]: e.target.value }));
+                        setAssignmentDrafts((prev) => ({ ...prev, [getDriverUserId(d)]: '' }));
+                      }}
+                    >
+                      <option value="">Select route...</option>
+                      {getActiveRoutes().map((r) => (
+                        <option key={r.id} value={String(r.id)}>
+                          Route {r.id}
                         </option>
-                      );
-                    })}
-                  </select>
-                  <Button
-                    variant="outline"
-                    onClick={() => saveDriverAssignment(
-                      Number(d.user_id || d.userId),
-                      assignmentDrafts[getDriverUserId(d)] ?? (d.assigned_vehicle_id ? String(d.assigned_vehicle_id) : '')
-                    )}
-                    disabled={loading}
-                  >
-                    Save Assignment
-                  </Button>
+                      ))}
+                    </select>
+                  </div>
+
+                  {assignmentRoutes[getDriverUserId(d)] && (
+                    <div className="flex flex-col sm:flex-row gap-2 sm:items-center">
+                      <select
+                        className="w-full sm:max-w-md rounded-md border border-input bg-background px-3 py-2 text-sm"
+                        value={assignmentDrafts[getDriverUserId(d)] ?? (d.assigned_vehicle_id ? String(d.assigned_vehicle_id) : '')}
+                        onChange={(e) => setAssignmentDrafts((prev) => ({ ...prev, [getDriverUserId(d)]: e.target.value }))}
+                      >
+                        <option value="">Unassign vehicle</option>
+                        {getVehiclesForRoute(assignmentRoutes[getDriverUserId(d)], Number(d.user_id || d.userId)).map((v) => (
+                          <option key={v.id} value={String(v.id)}>
+                            {v.registration_number} — {v.route_name || 'No route'} [Available]
+                          </option>
+                        ))}
+                      </select>
+                      <Button
+                        variant="outline"
+                        onClick={() => saveDriverAssignment(
+                          Number(d.user_id || d.userId),
+                          assignmentDrafts[getDriverUserId(d)] ?? (d.assigned_vehicle_id ? String(d.assigned_vehicle_id) : '')
+                        )}
+                        disabled={loading}
+                      >
+                        Save Assignment
+                      </Button>
+                    </div>
+                  )}
+                  <p className="text-xs text-muted-foreground">
+                    Select a route first, then choose an available vehicle from that route.
+                  </p>
                 </div>
               </div>
+
             </div>
           ))}
         </div>
-
-
-      </div>
 
       {/* Temp password modal */}
       <Dialog open={showTempPasswordModal} onOpenChange={(open) => { if (!open) { setShowTempPasswordModal(false); setTempPassword(null); } }}>
