@@ -37,4 +37,13 @@ router.use(authMiddleware);
 // FR2: M-Pesa Payment Simulation (simulate STK Push, mock success)
 router.post('/simulate', PaymentController.simulatePayment);
 
+// Protected routes below
+router.use(authMiddleware);
+
+// Get previous phone numbers for current user
+router.get('/previous-phones', PaymentController.getPreviousPhoneNumbers);
+
+// Admin stats
+router.get('/stats', PaymentController.getPaymentStats);
+
 module.exports = router;

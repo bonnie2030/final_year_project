@@ -72,6 +72,32 @@ class ReportController {
   }
 
   /**
+   * Get top-rated GENERAL feedback reports (GET /api/reports/top-rated)
+   * Query params: limit
+   */
+  static async getTopRatedFeedback(req, res, next) {
+    try {
+      const requestedLimit = parseInt(req.query.limit, 10);
+      const parsedLimit = Math.min(Math.max(Number.isFinite(requestedLimit) ? requestedLimit : 3, 1), 3);
+      const result = await ReportService.getTopRatedFeedback(parsedLimit);
+      res.status(200).json(result);
+    } catch (error) {
+      console.error('Get top-rated feedback error:', error);
+
+      if (error.statusCode) {
+        return res.status(error.statusCode).json({
+          message: error.message,
+        });
+      }
+
+      res.status(500).json({
+        message: 'Failed to retrieve top-rated feedback',
+        error: process.env.NODE_ENV === 'production' ? undefined : error.message,
+      });
+    }
+  }
+
+  /**
    * Get matatu performance stats (GET /api/reports/stats/:matatuId)
    */
   static async getMatatuStats(req, res, next) {

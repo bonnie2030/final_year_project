@@ -10,6 +10,7 @@ class PaymentModel {
         route_id INTEGER NOT NULL,
         vehicle_id INTEGER,
         amount DECIMAL(10, 2) NOT NULL,
+        distance DECIMAL(10, 2),
         phone_number VARCHAR(20) NOT NULL,
         status VARCHAR(20) DEFAULT 'pending',
         payment_method VARCHAR(50) DEFAULT 'M-Pesa',
@@ -40,6 +41,9 @@ class PaymentModel {
         IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='payments' AND column_name='checkout_request_id') THEN
           ALTER TABLE payments ADD COLUMN checkout_request_id VARCHAR(100);
         END IF;
+        IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='payments' AND column_name='distance') THEN
+          ALTER TABLE payments ADD COLUMN distance DECIMAL(10, 2);
+        END IF;
         IF EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='payments' AND column_name='user_id' AND is_nullable='NO') THEN
           ALTER TABLE payments ALTER COLUMN user_id DROP NOT NULL;
           ALTER TABLE payments DROP CONSTRAINT IF EXISTS payments_user_id_fkey;
@@ -57,14 +61,14 @@ class PaymentModel {
   }
 
   // Initiate payment simulation
-  static async initiatePayment(userId, routeId, amount, phoneNumber, vehicleId = null) {
+  static async initiatePayment(userId, routeId, amount, phoneNumber, vehicleId = null, distance = 0) {
     const query = `
-      INSERT INTO payments (user_id, route_id, vehicle_id, amount, phone_number, status)
-      VALUES ($1, $2, $3, $4, $5, 'pending')
+      INSERT INTO payments (user_id, route_id, vehicle_id, amount, distance, phone_number, status)
+      VALUES ($1, $2, $3, $4, $5, $6, 'pending')
       RETURNING *;
     `;
     try {
-      const result = await pool.query(query, [userId, routeId, vehicleId, amount, phoneNumber]);
+      const result = await pool.query(query, [userId, routeId, vehicleId, amount, distance || 0, phoneNumber]);
       return result.rows[0];
     } catch (error) {
       throw error;
@@ -142,6 +146,23 @@ class PaymentModel {
     `;
     const result = await pool.query(query, [id]);
     return result.rows[0];
+  }
+
+  // Get unique phone numbers for a user (previous payments)
+  static async getPreviousPhoneNumbersByUserId(userId, limit = 5) {
+    const query = `
+      SELECT DISTINCT phone_number
+      FROM payments
+      WHERE user_id = $1 AND phone_number NOT IN ('MANUAL-CASH')
+      ORDER BY created_at DESC
+      LIMIT $2;
+    `;
+    try {
+      const result = await pool.query(query, [userId, limit]);
+      return result.rows.map(r => r.phone_number);
+    } catch (error) {
+      throw error;
+    }
   }
 
   // Get user payments

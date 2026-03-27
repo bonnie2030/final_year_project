@@ -257,6 +257,26 @@ class ReportService {
   }
 
   /**
+   * Get top-rated GENERAL feedback reports for homepage testimonials.
+   * @param {number} limit - Maximum number of records to return
+   * @returns {Promise<Object>} Success-wrapped feedback array
+   */
+  static async getTopRatedFeedback(limit = 3) {
+    try {
+      const feedback = await ReportRepository.getTopRatedFeedback(limit);
+      return {
+        success: true,
+        feedback,
+      };
+    } catch (error) {
+      throw {
+        statusCode: 500,
+        message: `Failed to retrieve top-rated feedback: ${error.message}`,
+      };
+    }
+  }
+
+  /**
    * Get all reports for admin listing.
    * @param {Object} options - Pagination options
    * @returns {Promise<Object>} Reports wrapped in success response
