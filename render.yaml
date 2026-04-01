@@ -31,14 +31,17 @@ services:
       - key: JWT_EXPIRE
         value: 7d
 
-  - type: web
-    name: matatuconnect-frontend
-    runtime: node
+staticSites:
+  - name: matatuconnect-frontend
     rootDir: frontend
     buildCommand: corepack enable && pnpm install --frozen-lockfile && pnpm build
-    startCommand: pnpm dlx serve -s dist -l $PORT
-    autoDeploy: true
+    publishPath: dist
+    pullRequestPreviewsEnabled: true
     envVars:
       - key: VITE_API_URL
         value: https://matatuconnect-backend.onrender.com
+    routes:
+      - type: rewrite
+        source: /*
+        destination: /index.html
 
