@@ -1,12 +1,5 @@
 # Render Blueprint Configuration for MatatuConnect
 
-databases:
-  - name: matatuconnect-db
-    databaseName: matatuconnect
-    user: postgres
-    plan: free
-    version: "15"
-
 services:
   - type: web
     name: matatuconnect-backend
@@ -20,25 +13,15 @@ services:
       - key: NODE_ENV
         value: production
       - key: DB_HOST
-        fromDatabase:
-          name: matatuconnect-db
-          property: host
+        value: ""
       - key: DB_PORT
-        fromDatabase:
-          name: matatuconnect-db
-          property: port
+        value: "5432"
       - key: DB_NAME
-        fromDatabase:
-          name: matatuconnect-db
-          property: database
+        value: ""
       - key: DB_USER
-        fromDatabase:
-          name: matatuconnect-db
-          property: user
+        value: ""
       - key: DB_PASSWORD
-        fromDatabase:
-          name: matatuconnect-db
-          property: password
+        value: ""
       - key: DB_SSL
         value: require
       - key: DB_CHANNEL_BINDING
