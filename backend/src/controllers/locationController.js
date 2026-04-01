@@ -117,10 +117,58 @@ exports.getVehicleLocations = async (req, res) => {
       })
     );
 
+    let recentDbLocations = [];
+    try {
+      const dbLocationsResult = await db.query(
+        `SELECT
+           vl.vehicle_id AS id,
+           vl.driver_id,
+           COALESCE(u.name, 'Unknown Driver') AS driver_name,
+           vl.latitude,
+           vl.longitude,
+           vl.accuracy,
+           TRUE AS is_online,
+           vl.recorded_at AS last_update,
+           v.registration_number,
+           v.vehicle_type,
+           v.status,
+           COALESCE(vo.occupancy_status, 'available') AS occupancy_status,
+           COALESCE(vo.current_occupancy, 0) AS current_occupancy
+         FROM vehicle_locations vl
+         LEFT JOIN users u ON u.id = vl.driver_id
+         LEFT JOIN vehicles v ON v.id = vl.vehicle_id
+         LEFT JOIN vehicle_occupancy vo ON vo.vehicle_id = vl.vehicle_id
+         WHERE vl.recorded_at >= NOW() - INTERVAL '20 minutes'
+         ORDER BY vl.recorded_at DESC`
+      );
+
+      recentDbLocations = dbLocationsResult.rows.map((row) => ({
+        ...row,
+        latitude: parseFloat(row.latitude),
+        longitude: parseFloat(row.longitude),
+      }));
+    } catch (dbFallbackErr) {
+      console.warn('vehicle_locations fallback unavailable:', dbFallbackErr.message);
+    }
+
+    const mergedByVehicleId = new Map();
+
+    // DB fallback first
+    for (const loc of recentDbLocations) {
+      if (loc?.id) mergedByVehicleId.set(Number(loc.id), loc);
+    }
+
+    // Memory cache wins for freshest data
+    for (const loc of enrichedLocations) {
+      if (loc?.id) mergedByVehicleId.set(Number(loc.id), loc);
+    }
+
+    const onlineVehicles = Array.from(mergedByVehicleId.values()).filter(v => v.is_online);
+
     res.json({
       success: true,
-      count: enrichedLocations.length,
-      vehicles: enrichedLocations.filter(v => v.is_online)
+      count: onlineVehicles.length,
+      vehicles: onlineVehicles,
     });
   } catch (error) {
     console.error('Error fetching vehicle locations:', error);
