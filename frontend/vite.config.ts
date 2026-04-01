@@ -5,8 +5,11 @@ import basicSsl from "@vitejs/plugin-basic-ssl";
 import path from "path";
 import { componentTagger } from "lovable-tagger";
 
-// HTTPS is opt-in for local development.
-// Set VITE_DEV_HTTPS=true to use certificates in .cert/.
+// Auto-detect HTTPS for local development.
+// Behavior:
+// - VITE_DEV_HTTPS=true  => force HTTPS
+// - VITE_DEV_HTTPS=false => force HTTP
+// - unset                => HTTPS on when certs exist
 const certPath = path.resolve(__dirname, '.cert/cert.pem');
 const keyPath = path.resolve(__dirname, '.cert/key.pem');
 const hasCerts = fs.existsSync(certPath) && fs.existsSync(keyPath);
@@ -14,13 +17,16 @@ const hasCerts = fs.existsSync(certPath) && fs.existsSync(keyPath);
 // https://vitejs.dev/config/
 export default defineConfig(({ mode }) => {
   const env = loadEnv(mode, __dirname, '');
-  const useHttps = env.VITE_DEV_HTTPS === 'true';
-  const httpsConfig = useHttps && hasCerts
-    ? {
-        key: fs.readFileSync(keyPath),
-        cert: fs.readFileSync(certPath),
-      }
-    : false;
+  const httpsFlag = String(env.VITE_DEV_HTTPS || '').toLowerCase();
+  const enableHttps = httpsFlag === 'true' || (httpsFlag !== 'false' && hasCerts);
+  const httpsConfig = enableHttps
+    ? (hasCerts
+        ? {
+            key: fs.readFileSync(keyPath),
+            cert: fs.readFileSync(certPath),
+          }
+        : {})
+    : undefined;
 
   // Get API URL from env, default to localhost
   const apiUrl = env.VITE_API_URL || 'http://localhost:5000';
@@ -37,7 +43,7 @@ export default defineConfig(({ mode }) => {
           secure: false,
         },
         '/socket.io': {
-          target: 'http://localhost:5000',
+          target: apiUrl,
           changeOrigin: true,
           secure: false,
           ws: true,
